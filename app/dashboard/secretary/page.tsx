@@ -1,9 +1,21 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase';
 import { Printer, UserPlus, FileText, LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+
+const CERTIFICATE_OPTIONS = [
+  { label: 'Barangay Clearance', defaultFee: '50' },
+  { label: 'Certificate of Indigency', defaultFee: '0' },
+  { label: 'Certificate of Residency', defaultFee: '50' },
+  { label: 'Certificate of Good Moral Character', defaultFee: '50' },
+  { label: 'Barangay Business Clearance', defaultFee: '200' },
+  { label: 'First-Time Jobseeker Certification (RA 11261)', defaultFee: '0' },
+  { label: 'Certificate of Solo Parent', defaultFee: '0' },
+  { label: 'Certificate of File Action (CFA)', defaultFee: '100' },
+  { label: 'Certificate of No Blotter / No Derogatory Record', defaultFee: '50' },
+];
 
 export default function SecretaryDashboard() {
   const supabase = createClient();
@@ -12,7 +24,6 @@ export default function SecretaryDashboard() {
   const [certificates, setCertificates] = useState<any[]>([]);
   const [printData, setPrintData] = useState<any | null>(null);
 
-  // Resident Form State
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [birthdate, setBirthdate] = useState('');
@@ -23,11 +34,10 @@ export default function SecretaryDashboard() {
   const [isPwd, setIsPwd] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
 
-  // Certificate Request Form State
   const [selectedResident, setSelectedResident] = useState('');
-  const [certType, setCertType] = useState('Barangay Clearance');
+  const [certType, setCertType] = useState(CERTIFICATE_OPTIONS[0].label);
   const [purpose, setPurpose] = useState('');
-  const [fee, setFee] = useState('50');
+  const [fee, setFee] = useState(CERTIFICATE_OPTIONS[0].defaultFee);
 
   useEffect(() => {
     fetchData();
@@ -38,27 +48,31 @@ export default function SecretaryDashboard() {
       .from('residents')
       .select('*, households(purok)')
       .order('created_at', { ascending: false });
-
     const { data: certData } = await supabase
       .from('certificates')
       .select('*, residents(first_name, last_name, households(purok)), payments(or_number)')
       .order('created_at', { ascending: false });
-
     if (resData) setResidents(resData);
     if (certData) setCertificates(certData);
+  };
+
+  const handleCertTypeChange = (selectedType: string) => {
+    setCertType(selectedType);
+    const matched = CERTIFICATE_OPTIONS.find((item) => item.label === selectedType);
+    if (matched) {
+      setFee(matched.defaultFee);
+    }
   };
 
   const handleAddResident = async (e: React.FormEvent) => {
     e.preventDefault();
     let photoUrl = '';
 
-    // 1. Upload Photo to Supabase Storage
     if (photoFile) {
       const fileName = `${Date.now()}-${photoFile.name}`;
       const { data: uploadData } = await supabase.storage
         .from('resident-photos')
         .upload(fileName, photoFile);
-
       if (uploadData) {
         const { data: publicUrl } = supabase.storage
           .from('resident-photos')
@@ -67,18 +81,16 @@ export default function SecretaryDashboard() {
       }
     }
 
-    // 2. Create Household Entry
     const { data: hhData } = await supabase
       .from('households')
       .insert({
         household_number: `HH-${Date.now().toString().slice(-5)}`,
         purok,
-        address_line: `${purok}, Barangay Proper`,
+        address_line: `${purok}, Barangay Enrique JC Montilla`,
       })
       .select()
       .single();
 
-    // 3. Insert Resident
     await supabase.from('residents').insert({
       household_id: hhData?.id,
       first_name: firstName,
@@ -103,7 +115,6 @@ export default function SecretaryDashboard() {
   const handleRequestCertificate = async (e: React.FormEvent) => {
     e.preventDefault();
     const numericFee = parseFloat(fee);
-
     await supabase.from('certificates').insert({
       control_number: `BRGY-${Date.now().toString().slice(-6)}`,
       resident_id: selectedResident,
@@ -112,16 +123,80 @@ export default function SecretaryDashboard() {
       fee: numericFee,
       status: numericFee === 0 ? 'waived' : 'pending_payment',
     });
-
     setPurpose('');
     fetchData();
     alert('Certificate queued!');
   };
 
-  // Printable Certificate View
+  const renderCertificateBody = (cert: any) => {
+    const fullName = `${cert.residents?.first_name || ''} ${cert.residents?.last_name || ''}`.toUpperCase();
+    const residentPurok = cert.residents?.households?.purok || 'Barangay Proper';
+
+    switch (cert.certificate_type) {
+      case 'First-Time Jobseeker Certification (RA 11261)':
+        return (
+          <p className="mb-6 leading-relaxed indent-8 text-justify">
+            This is to certify that <strong>{fullName}</strong>, of legal age, Filipino, and a bona fide resident of{' '}
+            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, is a qualified
+            First-Time Jobseeker pursuant to <strong>Republic Act No. 11261</strong> (First Time Jobseekers
+            Assistance Act) and is hereby exempted from paying barangay fees and charges.
+          </p>
+        );
+      case 'Certificate of Good Moral Character':
+        return (
+          <p className="mb-6 leading-relaxed indent-8 text-justify">
+            This is to certify that <strong>{fullName}</strong>, of legal age, Filipino, and a resident of{' '}
+            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, is known to be of
+            good moral character, law-abiding, and a respected member of the community.
+          </p>
+        );
+      case 'Barangay Business Clearance':
+        return (
+          <p className="mb-6 leading-relaxed indent-8 text-justify">
+            This is to certify that <strong>{fullName}</strong>, operating within <strong>{residentPurok}</strong>,
+            Barangay Enrique JC Montilla, City of Tacurong, is hereby granted clearance to operate a lawful business
+            establishment subject to existing barangay ordinances and national laws.
+          </p>
+        );
+      case 'Certificate of Solo Parent':
+        return (
+          <p className="mb-6 leading-relaxed indent-8 text-justify">
+            This is to certify that <strong>{fullName}</strong>, of legal age, Filipino, and a bona fide resident of{' '}
+            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, is personally known
+            to be a Solo Parent solely raising and supporting their dependent child/children.
+          </p>
+        );
+      case 'Certificate of File Action (CFA)':
+        return (
+          <p className="mb-6 leading-relaxed indent-8 text-justify">
+            This is to certify that the complaint filed by <strong>{fullName}</strong> of{' '}
+            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, underwent mediation
+            and conciliation proceedings before the Lupong Tagapamayapa, and no settlement was reached; hence, the
+            corresponding complaint may now be filed in court/proper government office.
+          </p>
+        );
+      case 'Certificate of No Blotter / No Derogatory Record':
+        return (
+          <p className="mb-6 leading-relaxed indent-8 text-justify">
+            This is to certify that based on the official Barangay Blotter and Katarungang Pambarangay records,{' '}
+            <strong>{fullName}</strong>, a bona fide resident of <strong>{residentPurok}</strong>, Barangay Enrique
+            JC Montilla, City of Tacurong, has <strong>NO PENDING CASE OR DEROGATORY RECORD</strong> on file as of
+            this date.
+          </p>
+        );
+      default:
+        return (
+          <p className="mb-6 leading-relaxed indent-8 text-justify">
+            This is to certify that <strong>{fullName}</strong>, of legal age, Filipino, is a bona fide resident of{' '}
+            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong.
+          </p>
+        );
+    }
+  };
+
   if (printData) {
     return (
-      <div className="p-8 bg-white min-h-screen">
+      <div className="p-8 bg-white min-h-screen text-black">
         <div className="mb-6 flex gap-4 print:hidden">
           <button
             onClick={() => window.print()}
@@ -142,27 +217,17 @@ export default function SecretaryDashboard() {
             <p className="text-sm">Republic of the Philippines</p>
             <p className="text-sm">Province of Sultan Kudarat • City of Tacurong</p>
             <h2 className="text-xl font-bold uppercase mt-1">Office of the Punong Barangay</h2>
+            <p className="text-xs uppercase tracking-wider mt-1">Barangay Enrique JC Montilla</p>
           </div>
-
           <h1 className="text-2xl font-bold text-center underline uppercase my-8">
             {printData.certificate_type}
           </h1>
-
-          <p className="mb-6 leading-relaxed indent-8 text-justify">
-            This is to certify that{' '}
-            <strong>
-              {printData.residents?.first_name} {printData.residents?.last_name}
-            </strong>
-            , of legal age, Filipino, is a bona fide resident of{' '}
-            <strong>{printData.residents?.households?.purok}</strong>, Barangay Enrique JC Montilla,
-            City of Tacurong.
-          </p>
-
+          <p className="mb-4 font-bold">TO WHOM IT MAY CONCERN:</p>
+          {renderCertificateBody(printData)}
           <p className="mb-12 leading-relaxed indent-8 text-justify">
             This certification is issued upon the request of the interested party for{' '}
             <strong>{printData.purpose.toUpperCase()}</strong>.
           </p>
-
           <div className="mt-24 flex justify-between items-end">
             <div className="text-xs space-y-1">
               <p>
@@ -175,7 +240,6 @@ export default function SecretaryDashboard() {
                 Date Issued: <strong>{new Date().toLocaleDateString()}</strong>
               </p>
             </div>
-
             <div className="text-center">
               <p className="font-bold underline uppercase">Hon. Juan Dela Cruz</p>
               <p className="text-sm">Punong Barangay</p>
@@ -208,7 +272,6 @@ export default function SecretaryDashboard() {
             <h2 className="font-bold text-lg flex items-center gap-2 text-blue-700">
               <UserPlus size={20} /> Encode Resident & Photo
             </h2>
-
             <div className="grid grid-cols-2 gap-3">
               <input
                 placeholder="First Name"
@@ -225,7 +288,6 @@ export default function SecretaryDashboard() {
                 required
               />
             </div>
-
             <div className="grid grid-cols-2 gap-3">
               <input
                 type="date"
@@ -243,7 +305,6 @@ export default function SecretaryDashboard() {
                 <option>Female</option>
               </select>
             </div>
-
             <div className="grid grid-cols-2 gap-3">
               <select
                 value={purok}
@@ -262,7 +323,6 @@ export default function SecretaryDashboard() {
                 className="border p-2 rounded"
               />
             </div>
-
             <div className="flex gap-4 text-sm">
               <label className="flex items-center gap-1">
                 <input
@@ -281,7 +341,6 @@ export default function SecretaryDashboard() {
                 PWD
               </label>
             </div>
-
             <div>
               <label className="block text-xs text-slate-500 mb-1">Resident Photo</label>
               <input
@@ -291,7 +350,6 @@ export default function SecretaryDashboard() {
                 className="text-sm"
               />
             </div>
-
             <button
               type="submit"
               className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium"
@@ -308,7 +366,6 @@ export default function SecretaryDashboard() {
             <h2 className="font-bold text-lg flex items-center gap-2 text-emerald-700">
               <FileText size={20} /> Encode Certificate Request
             </h2>
-
             <select
               value={selectedResident}
               onChange={(e) => setSelectedResident(e.target.value)}
@@ -322,28 +379,27 @@ export default function SecretaryDashboard() {
                 </option>
               ))}
             </select>
-
             <select
               value={certType}
-              onChange={(e) => setCertType(e.target.value)}
+              onChange={(e) => handleCertTypeChange(e.target.value)}
               className="w-full border p-2 rounded"
             >
-              <option>Barangay Clearance</option>
-              <option>Certificate of Indigency</option>
-              <option>Certificate of Residency</option>
+              {CERTIFICATE_OPTIONS.map((opt) => (
+                <option key={opt.label} value={opt.label}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
-
             <input
-              placeholder="Purpose (e.g., Employment, Scholarship)"
+              placeholder="Purpose (e.g., Employment, Scholarship, Business Permit)"
               value={purpose}
               onChange={(e) => setPurpose(e.target.value)}
               className="w-full border p-2 rounded"
               required
             />
-
             <div>
               <label className="block text-xs text-slate-500 mb-1">
-                Fee (PHP) — Set 0 for Indigency/Waived
+                Fee (PHP) — Auto-filled (Editable; 0 = Waived/Free)
               </label>
               <input
                 type="number"
@@ -353,7 +409,6 @@ export default function SecretaryDashboard() {
                 required
               />
             </div>
-
             <button
               type="submit"
               className="w-full bg-emerald-600 text-white py-2 rounded-lg font-medium"
