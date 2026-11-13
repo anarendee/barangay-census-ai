@@ -4,30 +4,31 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase';
 import {
   Printer, UserPlus, FileText, LogOut, Sparkles, Users,
-  Search, Trash2, Building2, CheckCircle2, Clock
+  Search, Trash2, Building2, CheckCircle2, Clock, ShieldAlert, Scale
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 
 const CERTIFICATE_OPTIONS = [
-  { label: 'Barangay Clearance', defaultFee: '50' },
-  { label: 'Certificate of Indigency', defaultFee: '0' },
-  { label: 'Certificate of Residency', defaultFee: '50' },
-  { label: 'Certificate of Good Moral Character', defaultFee: '50' },
-  { label: 'Barangay Business Clearance', defaultFee: '200' },
-  { label: 'First-Time Jobseeker Certification (RA 11261)', defaultFee: '0' },
-  { label: 'Certificate of Solo Parent', defaultFee: '0' },
-  { label: 'Certificate of File Action (CFA)', defaultFee: '100' },
-  { label: 'Certificate of No Blotter / No Derogatory Record', defaultFee: '50' },
+  { label: 'Barangay Clearance', defaultFee: '50', requiresClearBlotter: true },
+  { label: 'Certificate of Indigency', defaultFee: '0', requiresClearBlotter: false },
+  { label: 'Certificate of Residency', defaultFee: '50', requiresClearBlotter: false },
+  { label: 'Certificate of Good Moral Character', defaultFee: '50', requiresClearBlotter: true },
+  { label: 'Barangay Business Clearance', defaultFee: '200', requiresClearBlotter: true },
+  { label: 'First-Time Jobseeker Certification (RA 11261)', defaultFee: '0', requiresClearBlotter: true },
+  { label: 'Certificate of Solo Parent', defaultFee: '0', requiresClearBlotter: false },
+  { label: 'Certificate of File Action (CFA)', defaultFee: '100', requiresClearBlotter: false },
+  { label: 'Certificate of No Blotter / No Derogatory Record', defaultFee: '50', requiresClearBlotter: true },
 ];
 
 export default function SecretaryDashboard() {
   const supabase = createClient();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<'census' | 'certificates' | 'directory'>('census');
+  const [activeTab, setActiveTab] = useState<'census' | 'certificates' | 'blotter' | 'directory'>('census');
   const [residents, setResidents] = useState<any[]>([]);
   const [certificates, setCertificates] = useState<any[]>([]);
+  const [blotters, setBlotters] = useState<any[]>([]);
   const [printData, setPrintData] = useState<any | null>(null);
   const [originUrl, setOriginUrl] = useState('');
 
@@ -60,10 +61,20 @@ export default function SecretaryDashboard() {
   const [purpose, setPurpose] = useState('');
   const [fee, setFee] = useState(CERTIFICATE_OPTIONS[0].defaultFee);
 
-  // AI Helper State
+  // AI Certificate Helper State
   const [aiQuery, setAiQuery] = useState('');
   const [aiSuggestion, setAiSuggestion] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+
+  // Blotter & Dispute Form State
+  const [complainantName, setComplainantName] = useState('');
+  const [respondentId, setRespondentId] = useState('');
+  const [respondentExternal, setRespondentExternal] = useState('');
+  const [incidentType, setIncidentType] = useState('Physical Injury / Altercation');
+  const [incidentDate, setIncidentDate] = useState('');
+  const [incidentLocation, setIncidentLocation] = useState('');
+  const [narrative, setNarrative] = useState('');
+  const [draftingBlotter, setDraftingBlotter] = useState(false);
 
   useEffect(() => {
     setOriginUrl(window.location.origin);
@@ -81,9 +92,28 @@ export default function SecretaryDashboard() {
       .select('*, residents(first_name, middle_name, last_name, suffix, photo_url, households(purok)), payments(or_number)')
       .order('created_at', { ascending: false });
 
+    const { data: blotterData } = await supabase
+      .from('blotters')
+      .select('*, residents(first_name, last_name, households(purok))')
+      .order('created_at', { ascending: false });
+
     if (resData) setResidents(resData);
     if (certData) setCertificates(certData);
+    if (blotterData) setBlotters(blotterData);
   };
+
+  // Helper: Check if a resident has an active/pending blotter case
+  const getActiveBlottersForResident = (resId: string) => {
+    if (!resId) return [];
+    return blotters.filter(
+      (b) => b.respondent_resident_id === resId && (b.status === 'Pending' || b.status === 'Mediation')
+    );
+  };
+
+  const activeBlottersForSelected = getActiveBlottersForResident(selectedResident);
+  const selectedCertConfig = CERTIFICATE_OPTIONS.find((c) => c.label === certType);
+  const isBlockedByBlotter =
+    activeBlottersForSelected.length > 0 && Boolean(selectedCertConfig?.requiresClearBlotter);
 
   const handleCertTypeChange = (selectedType: string) => {
     setCertType(selectedType);
@@ -99,7 +129,7 @@ export default function SecretaryDashboard() {
 
     const residentObj = residents.find((r) => r.id === selectedResident);
     const residentContext = residentObj
-      ? `Selected Resident: ${residentObj.first_name} ${residentObj.last_name}, Occupation: ${residentObj.occupation || 'None'}, Senior: ${residentObj.is_senior}, PWD: ${residentObj.is_pwd}, 4Ps: ${residentObj.is_4ps}, Monthly Income: ₱${residentObj.households?.monthly_income || 0}.`
+      ? `Selected Resident: ${residentObj.first_name} ${residentObj.last_name}, Occupation: ${residentObj.occupation || 'None'}, Senior: ${residentObj.is_senior}, PWD: ${residentObj.is_pwd}, 4Ps: ${residentObj.is_4ps}, Active Blotters: ${activeBlottersForSelected.length}.`
       : 'No specific resident selected yet.';
 
     try {
@@ -107,7 +137,7 @@ export default function SecretaryDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `As a Philippine Barangay Secretary Assistant, recommend the exact certificate type from our list (Barangay Clearance, Certificate of Indigency, Certificate of Residency, Certificate of Good Moral Character, Barangay Business Clearance, First-Time Jobseeker Certification (RA 11261), Certificate of Solo Parent, Certificate of File Action (CFA), Certificate of No Blotter / No Derogatory Record), state whether the fee should be waived (e.g., RA 11261, Indigency, 4Ps, Senior/PWD), and provide a 1-sentence formal purpose phrase. ${residentContext} Scenario: ${aiQuery}`,
+          prompt: `As a Philippine Barangay Secretary Assistant, recommend the exact certificate type from our list (Barangay Clearance, Certificate of Indigency, Certificate of Residency, Certificate of Good Moral Character, Barangay Business Clearance, First-Time Jobseeker Certification (RA 11261), Certificate of Solo Parent, Certificate of File Action (CFA), Certificate of No Blotter / No Derogatory Record), state whether the fee should be waived (e.g., RA 11261, Indigency, 4Ps, Senior/PWD), warn if active blotters block clearance, and provide a 1-sentence formal purpose phrase. ${residentContext} Scenario: ${aiQuery}`,
         }),
       });
       const data = await res.json();
@@ -117,6 +147,69 @@ export default function SecretaryDashboard() {
     } finally {
       setAiLoading(false);
     }
+  };
+
+  // AI Formal Blotter Narrative Formatter
+  const handleDraftBlotterNarrative = async () => {
+    if (!narrative.trim()) {
+      alert('Please enter rough notes in the Incident Narrative box first so AI can format it.');
+      return;
+    }
+    setDraftingBlotter(true);
+    try {
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Rewrite the following rough incident notes into a formal, objective Philippine Katarungang Pambarangay Blotter entry (third-person legal/administrative tone, clear chronology, no embellishment). Incident Type: ${incidentType}. Complainant: ${complainantName || 'Complainant'}. Notes: ${narrative}`,
+        }),
+      });
+      const data = await res.json();
+      if (data.reply) setNarrative(data.reply);
+    } catch {
+      alert('AI narrative drafter unavailable right now.');
+    } finally {
+      setDraftingBlotter(false);
+    }
+  };
+
+  const handleAddBlotter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const respondentObj = residents.find((r) => r.id === respondentId);
+    const resolvedRespondentName = respondentObj
+      ? `${respondentObj.first_name} ${respondentObj.last_name}`
+      : respondentExternal.trim() || 'Unknown Respondent';
+
+    const { error } = await supabase.from('blotters').insert({
+      blotter_number: `BLT-${Date.now().toString().slice(-6)}`,
+      complainant_name: complainantName,
+      respondent_resident_id: respondentId || null,
+      respondent_name: resolvedRespondentName,
+      incident_type: incidentType,
+      incident_date: incidentDate,
+      incident_location: incidentLocation,
+      narrative,
+      status: 'Pending',
+    });
+
+    if (error) {
+      alert(`Error saving blotter: ${error.message}`);
+      return;
+    }
+
+    setComplainantName('');
+    setRespondentId('');
+    setRespondentExternal('');
+    setIncidentDate('');
+    setIncidentLocation('');
+    setNarrative('');
+    fetchData();
+    alert('Blotter case recorded! Certificate clearances for the respondent are now automatically flagged.');
+  };
+
+  const handleUpdateBlotterStatus = async (id: string, newStatus: string) => {
+    await supabase.from('blotters').update({ status: newStatus }).eq('id', id);
+    fetchData();
   };
 
   const handleAddResident = async (e: React.FormEvent) => {
@@ -166,7 +259,6 @@ export default function SecretaryDashboard() {
       photo_url: photoUrl,
     });
 
-    // Reset form
     setFirstName('');
     setMiddleName('');
     setLastName('');
@@ -194,8 +286,14 @@ export default function SecretaryDashboard() {
 
   const handleRequestCertificate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const numericFee = parseFloat(fee);
+    if (isBlockedByBlotter) {
+      alert(
+        'ISSUANCE BLOCKED: This resident has an active/unresolved Barangay Blotter case. Settle or dismiss the blotter case first, or issue a Certificate of File Action (CFA).'
+      );
+      return;
+    }
 
+    const numericFee = parseFloat(fee);
     await supabase.from('certificates').insert({
       control_number: `BRGY-${Date.now().toString().slice(-6)}`,
       resident_id: selectedResident,
@@ -284,7 +382,6 @@ export default function SecretaryDashboard() {
     }
   };
 
-  // Filtered Residents for Directory
   const filteredResidents = residents.filter((r) => {
     const matchesSearch =
       `${r.first_name} ${r.middle_name || ''} ${r.last_name} ${r.occupation || ''}`
@@ -294,7 +391,6 @@ export default function SecretaryDashboard() {
     return matchesSearch && matchesPurok;
   });
 
-  // Printable Certificate View
   if (printData) {
     const verifyUrl = `${originUrl}/verify/${printData.control_number}`;
 
@@ -386,7 +482,9 @@ export default function SecretaryDashboard() {
         <header className="flex flex-wrap justify-between items-center bg-white p-4 rounded-xl shadow-sm gap-4">
           <div>
             <h1 className="text-xl font-bold text-slate-800">Barangay Secretary Portal</h1>
-            <p className="text-xs text-slate-500">Barangay Enrique JC Montilla • Census & Issuance Desk</p>
+            <p className="text-xs text-slate-500">
+              Barangay Enrique JC Montilla • Census, Blotter & Issuance Desk
+            </p>
           </div>
           <button
             onClick={async () => {
@@ -422,6 +520,17 @@ export default function SecretaryDashboard() {
             <FileText size={16} /> Certificates & AI Helper ({certificates.length})
           </button>
           <button
+            onClick={() => setActiveTab('blotter')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+              activeTab === 'blotter'
+                ? 'bg-rose-600 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Scale size={16} /> Blotter & Disputes (
+            {blotters.filter((b) => b.status === 'Pending' || b.status === 'Mediation').length} Active)
+          </button>
+          <button
             onClick={() => setActiveTab('directory')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
               activeTab === 'directory'
@@ -440,10 +549,11 @@ export default function SecretaryDashboard() {
               <h2 className="font-bold text-lg flex items-center gap-2 text-blue-700">
                 <UserPlus size={20} /> Encode Complete Resident & Household Profile
               </h2>
-              <p className="text-xs text-slate-500">All demographic attributes feed directly into the Admin AI Census Analyst.</p>
+              <p className="text-xs text-slate-500">
+                All demographic attributes feed directly into the Admin AI Census Analyst.
+              </p>
             </div>
 
-            {/* Personal Identity */}
             <div className="grid md:grid-cols-4 gap-3">
               <div>
                 <label className="block text-xs text-slate-500 mb-1">First Name *</label>
@@ -485,7 +595,6 @@ export default function SecretaryDashboard() {
               </div>
             </div>
 
-            {/* Demographics */}
             <div className="grid md:grid-cols-4 gap-3">
               <div>
                 <label className="block text-xs text-slate-500 mb-1">Birthdate *</label>
@@ -532,7 +641,6 @@ export default function SecretaryDashboard() {
               </div>
             </div>
 
-            {/* Household & Economic Info */}
             <div className="bg-slate-50 p-4 rounded-lg border space-y-3">
               <h3 className="text-xs font-bold uppercase text-slate-600 flex items-center gap-1">
                 <Building2 size={14} /> Household & Socio-Economic Data
@@ -584,7 +692,6 @@ export default function SecretaryDashboard() {
               </div>
             </div>
 
-            {/* Sector Classifications & Photo */}
             <div className="grid md:grid-cols-2 gap-4 items-center">
               <div className="flex flex-wrap gap-4 text-sm bg-slate-50 p-3 rounded-lg border">
                 <label className="flex items-center gap-1.5 cursor-pointer">
@@ -641,10 +748,9 @@ export default function SecretaryDashboard() {
           </form>
         )}
 
-        {/* TAB 2: CERTIFICATES & AI HELPER */}
+        {/* TAB 2: CERTIFICATES & AI HELPER WITH BLOTTER AUTO-BLOCKING */}
         {activeTab === 'certificates' && (
           <div className="space-y-6">
-            {/* AI Eligibility & Purpose Assistant */}
             <div className="bg-indigo-50 border border-indigo-200 p-5 rounded-xl space-y-3">
               <h2 className="font-bold text-indigo-900 flex items-center gap-2 text-base">
                 <Sparkles size={18} className="text-indigo-600" /> AI Certificate Eligibility & Purpose Helper
@@ -671,7 +777,6 @@ export default function SecretaryDashboard() {
               )}
             </div>
 
-            {/* Request Form */}
             <form
               onSubmit={handleRequestCertificate}
               className="bg-white p-6 rounded-xl shadow-sm space-y-4"
@@ -679,6 +784,28 @@ export default function SecretaryDashboard() {
               <h2 className="font-bold text-lg flex items-center gap-2 text-emerald-700">
                 <FileText size={20} /> Encode Certificate Request
               </h2>
+
+              {/* Automatic Blotter Cross-Check Alert */}
+              {activeBlottersForSelected.length > 0 && (
+                <div className="bg-rose-50 border border-rose-300 p-4 rounded-xl flex items-start gap-3 text-rose-900">
+                  <ShieldAlert size={22} className="text-rose-600 shrink-0 mt-0.5" />
+                  <div className="text-xs space-y-1">
+                    <p className="font-bold text-sm">
+                      BLOTTER ALERT: {activeBlottersForSelected.length} Active / Unresolved Case(s) Found!
+                    </p>
+                    {activeBlottersForSelected.map((b) => (
+                      <p key={b.id}>
+                        • <span className="font-mono font-bold">{b.blotter_number}</span> ({b.incident_type}) — Status:{' '}
+                        <strong>{b.status}</strong>
+                      </p>
+                    ))}
+                    <p className="pt-1 font-medium">
+                      Clearance documents (Barangay Clearance, Good Moral, Business Clearance, No Derogatory Record) are automatically blocked until resolved.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Select Resident *</label>
@@ -739,9 +866,12 @@ export default function SecretaryDashboard() {
 
               <button
                 type="submit"
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg font-medium transition"
+                disabled={isBlockedByBlotter}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-rose-400 disabled:cursor-not-allowed text-white py-2.5 rounded-lg font-medium transition"
               >
-                Queue Certificate for Issuance
+                {isBlockedByBlotter
+                  ? 'Blocked Due to Active Blotter Case'
+                  : 'Queue Certificate for Issuance'}
               </button>
             </form>
 
@@ -806,7 +936,200 @@ export default function SecretaryDashboard() {
           </div>
         )}
 
-        {/* TAB 3: RESIDENTS DIRECTORY WITH LIVE SEARCH & FILTER */}
+        {/* TAB 3: KATARUNGANG PAMBARANGAY BLOTTER & DISPUTE MANAGEMENT */}
+        {activeTab === 'blotter' && (
+          <div className="space-y-6">
+            <form onSubmit={handleAddBlotter} className="bg-white p-6 rounded-xl shadow-sm space-y-4">
+              <div className="border-b pb-3">
+                <h2 className="font-bold text-lg flex items-center gap-2 text-rose-700">
+                  <Scale size={20} /> Record Katarungang Pambarangay Blotter / Incident
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Linking a registered resident as Respondent automatically flags their profile in Certificate Issuance until settled.
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Complainant Full Name *</label>
+                  <input
+                    placeholder="Name of person filing complaint"
+                    value={complainantName}
+                    onChange={(e) => setComplainantName(e.target.value)}
+                    className="w-full border p-2.5 rounded text-sm"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    Respondent (Registered Resident)
+                  </label>
+                  <select
+                    value={respondentId}
+                    onChange={(e) => setRespondentId(e.target.value)}
+                    className="w-full border p-2.5 rounded text-sm"
+                  >
+                    <option value="">-- Non-Resident / Select Resident --</option>
+                    {residents.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.last_name}, {r.first_name} ({r.households?.purok || 'No Purok'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    Or External Respondent Name
+                  </label>
+                  <input
+                    placeholder="If respondent is not in census"
+                    value={respondentExternal}
+                    onChange={(e) => setRespondentExternal(e.target.value)}
+                    disabled={Boolean(respondentId)}
+                    className="w-full border p-2.5 rounded text-sm disabled:bg-slate-100"
+                  />
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Incident Category *</label>
+                  <select
+                    value={incidentType}
+                    onChange={(e) => setIncidentType(e.target.value)}
+                    className="w-full border p-2.5 rounded text-sm"
+                  >
+                    <option>Physical Injury / Altercation</option>
+                    <option>Boundary / Property Dispute</option>
+                    <option>Unpaid Debt / Estafa</option>
+                    <option>Noise / Public Disturbance</option>
+                    <option>Theft / Property Damage</option>
+                    <option>Domestic / Family Dispute</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Date & Time of Incident *</label>
+                  <input
+                    type="datetime-local"
+                    value={incidentDate}
+                    onChange={(e) => setIncidentDate(e.target.value)}
+                    className="w-full border p-2.5 rounded text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Place of Incident *</label>
+                  <input
+                    placeholder="e.g., Purok 2 Basketball Court"
+                    value={incidentLocation}
+                    onChange={(e) => setIncidentLocation(e.target.value)}
+                    className="w-full border p-2.5 rounded text-sm"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-xs text-slate-500">
+                    Incident Narrative / Statement of Facts *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleDraftBlotterNarrative}
+                    disabled={draftingBlotter}
+                    className="text-xs bg-indigo-100 text-indigo-800 hover:bg-indigo-200 px-2.5 py-1 rounded flex items-center gap-1 font-medium"
+                  >
+                    <Sparkles size={13} />
+                    {draftingBlotter ? 'Drafting Formal Narrative...' : 'AI Formalize Narrative'}
+                  </button>
+                </div>
+                <textarea
+                  rows={4}
+                  placeholder="Type rough notes of what happened, then click 'AI Formalize Narrative' to convert into official legal blotter phrasing..."
+                  value={narrative}
+                  onChange={(e) => setNarrative(e.target.value)}
+                  className="w-full border p-2.5 rounded text-sm"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white py-2.5 rounded-lg font-medium transition"
+              >
+                Save Official Blotter Record
+              </button>
+            </form>
+
+            {/* Blotter Log Table */}
+            <div className="bg-white p-6 rounded-xl shadow-sm">
+              <h2 className="font-bold text-lg mb-4">Barangay Blotter & Lupon Mediation Log</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b text-slate-500">
+                      <th className="py-2">Blotter No</th>
+                      <th>Complainant</th>
+                      <th>Respondent</th>
+                      <th>Incident</th>
+                      <th>Status</th>
+                      <th>Update Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {blotters.map((b) => (
+                      <tr key={b.id} className="border-b">
+                        <td className="py-3 font-mono text-xs font-bold">{b.blotter_number}</td>
+                        <td>{b.complainant_name}</td>
+                        <td className="font-medium text-slate-800">{b.respondent_name}</td>
+                        <td>
+                          <p className="font-medium">{b.incident_type}</p>
+                          <p className="text-xs text-slate-500 line-clamp-1">{b.narrative}</p>
+                        </td>
+                        <td>
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-medium ${
+                              b.status === 'Settled' || b.status === 'Dismissed'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {b.status.toUpperCase()}
+                          </span>
+                        </td>
+                        <td>
+                          <select
+                            value={b.status}
+                            onChange={(e) => handleUpdateBlotterStatus(b.id, e.target.value)}
+                            className="border p-1.5 rounded text-xs bg-white"
+                          >
+                            <option value="Pending">Pending</option>
+                            <option value="Mediation">Mediation</option>
+                            <option value="Settled">Settled</option>
+                            <option value="Escalated to CFA">Escalated to CFA</option>
+                            <option value="Dismissed">Dismissed</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                    {blotters.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-6 text-center text-slate-400">
+                          No blotter incidents recorded yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: RESIDENTS DIRECTORY WITH BLOTTER BADGE */}
         {activeTab === 'directory' && (
           <div className="bg-white p-6 rounded-xl shadow-sm space-y-4">
             <div className="flex flex-wrap justify-between items-center gap-4">
@@ -848,75 +1171,83 @@ export default function SecretaryDashboard() {
                     <th>Full Name</th>
                     <th>Civil Status / Gender</th>
                     <th>Purok & Income</th>
-                    <th>Sector Tags</th>
+                    <th>Status & Sector Tags</th>
                     <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredResidents.map((res) => (
-                    <tr key={res.id} className="border-b hover:bg-slate-50">
-                      <td className="py-2.5">
-                        {res.photo_url ? (
-                          <img
-                            src={res.photo_url}
-                            alt={res.first_name}
-                            className="w-10 h-10 rounded-full object-cover border"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
-                            {res.first_name?.[0]}
-                            {res.last_name?.[0]}
-                          </div>
-                        )}
-                      </td>
-                      <td>
-                        <p className="font-medium text-slate-800">
-                          {res.last_name}, {res.first_name} {res.middle_name || ''} {res.suffix || ''}
-                        </p>
-                        <p className="text-xs text-slate-500">{res.occupation || 'No occupation listed'}</p>
-                      </td>
-                      <td className="text-xs">
-                        {res.civil_status} • {res.gender}
-                      </td>
-                      <td className="text-xs">
-                        <p className="font-medium">{res.households?.purok || 'N/A'}</p>
-                        <p className="text-slate-500">₱{res.households?.monthly_income || 0}/mo</p>
-                      </td>
-                      <td className="space-x-1">
-                        {res.is_voter && (
-                          <span className="bg-emerald-100 text-emerald-800 text-[11px] px-2 py-0.5 rounded">
-                            Voter
-                          </span>
-                        )}
-                        {res.is_senior && (
-                          <span className="bg-blue-100 text-blue-800 text-[11px] px-2 py-0.5 rounded">
-                            Senior
-                          </span>
-                        )}
-                        {res.is_pwd && (
-                          <span className="bg-purple-100 text-purple-800 text-[11px] px-2 py-0.5 rounded">
-                            PWD
-                          </span>
-                        )}
-                        {res.is_4ps && (
-                          <span className="bg-amber-100 text-amber-800 text-[11px] px-2 py-0.5 rounded">
-                            4Ps
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          onClick={() =>
-                            handleDeleteResident(res.id, `${res.first_name} ${res.last_name}`)
-                          }
-                          className="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-red-50"
-                          title="Delete Resident Record"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredResidents.map((res) => {
+                    const hasActiveCase = getActiveBlottersForResident(res.id).length > 0;
+                    return (
+                      <tr key={res.id} className="border-b hover:bg-slate-50">
+                        <td className="py-2.5">
+                          {res.photo_url ? (
+                            <img
+                              src={res.photo_url}
+                              alt={res.first_name}
+                              className="w-10 h-10 rounded-full object-cover border"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
+                              {res.first_name?.[0]}
+                              {res.last_name?.[0]}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <p className="font-medium text-slate-800">
+                            {res.last_name}, {res.first_name} {res.middle_name || ''} {res.suffix || ''}
+                          </p>
+                          <p className="text-xs text-slate-500">{res.occupation || 'No occupation listed'}</p>
+                        </td>
+                        <td className="text-xs">
+                          {res.civil_status} • {res.gender}
+                        </td>
+                        <td className="text-xs">
+                          <p className="font-medium">{res.households?.purok || 'N/A'}</p>
+                          <p className="text-slate-500">₱{res.households?.monthly_income || 0}/mo</p>
+                        </td>
+                        <td className="space-x-1 space-y-1">
+                          {hasActiveCase && (
+                            <span className="bg-rose-100 text-rose-800 text-[11px] font-bold px-2 py-0.5 rounded inline-flex items-center gap-1">
+                              <ShieldAlert size={11} /> Active Blotter
+                            </span>
+                          )}
+                          {res.is_voter && (
+                            <span className="bg-emerald-100 text-emerald-800 text-[11px] px-2 py-0.5 rounded">
+                              Voter
+                            </span>
+                          )}
+                          {res.is_senior && (
+                            <span className="bg-blue-100 text-blue-800 text-[11px] px-2 py-0.5 rounded">
+                              Senior
+                            </span>
+                          )}
+                          {res.is_pwd && (
+                            <span className="bg-purple-100 text-purple-800 text-[11px] px-2 py-0.5 rounded">
+                              PWD
+                            </span>
+                          )}
+                          {res.is_4ps && (
+                            <span className="bg-amber-100 text-amber-800 text-[11px] px-2 py-0.5 rounded">
+                              4Ps
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <button
+                            onClick={() =>
+                              handleDeleteResident(res.id, `${res.first_name} ${res.last_name}`)
+                            }
+                            className="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-red-50"
+                            title="Delete Resident Record"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {filteredResidents.length === 0 && (
                     <tr>
                       <td colSpan={6} className="py-6 text-center text-slate-400">
