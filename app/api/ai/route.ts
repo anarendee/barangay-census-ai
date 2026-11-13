@@ -62,7 +62,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const text = geminiData?.candidates?.?.content?.parts?.?.text || 'No response generated.';
+    const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
     return NextResponse.json({ reply: text });
   } catch (error: any) {
     return NextResponse.json(
