@@ -1,10 +1,9 @@
 ﻿import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
       return NextResponse.json(
         { error: 'GEMINI_API_KEY is missing in environment variables.' },
@@ -28,10 +27,7 @@ export async function POST(req: Request) {
 
     const { data: inventory } = await supabase.from('inventory').select('*');
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-
-    const context = `
+    const systemPrompt = `
       You are an AI Assistant for Barangay Enrique JC Montilla, City of Tacurong, Philippines.
       If asked to draft or formalize a blotter narrative, legal purpose, or resolution, write a clear, formal, objective Philippine barangay document text directly without markdown asterisks or extra commentary.
       If asked an analytical question about census or inventory, use the live records below.
@@ -39,12 +35,36 @@ export async function POST(req: Request) {
       Inventory Data: ${JSON.stringify(inventory || [])}
     `;
 
-    const result = await model.generateContent(`${context}\n\nRequest: ${prompt}`);
-    const text = result.response.text();
+    const geminiRes = await fetch(
+      'https://googleapis.com',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: `${systemPrompt}\n\nRequest: ${prompt}` }],
+            },
+          ],
+        }),
+      }
+    );
 
+    const geminiData = await geminiRes.json();
+
+    if (!geminiRes.ok) {
+      return NextResponse.json(
+        { error: geminiData?.error?.message || `Gemini API returned status ${geminiRes.status}` },
+        { status: geminiRes.status }
+      );
+    }
+
+    const text = geminiData?.candidates?.?.content?.parts?.?.text || 'No response generated.';
     return NextResponse.json({ reply: text });
   } catch (error: any) {
-    console.error('AI Route Error:', error);
     return NextResponse.json(
       { error: error?.message || 'Failed to connect to Gemini AI service.' },
       { status: 500 }
