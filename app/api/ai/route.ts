@@ -1,16 +1,26 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 export async function POST(req: Request) {
   try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'GEMINI_API_KEY is missing in environment variables.' },
+        { status: 500 }
+      );
+    }
+
     const { prompt } = await req.json();
+    if (!prompt) {
+      return NextResponse.json({ error: 'Prompt is required.' }, { status: 400 });
+    }
+
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
 
     const { data: residents } = await supabase
       .from('residents')
@@ -18,19 +28,26 @@ export async function POST(req: Request) {
 
     const { data: inventory } = await supabase.from('inventory').select('*');
 
+    const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
     const context = `
-      You are an AI Assistant for a Philippine Barangay Census & Governance System.
-      Answer questions accurately using the provided live database records.
-      You can count demographics, identify vulnerable sectors (Seniors, PWDs, 4Ps), draft formal Filipino/English barangay resolutions or blotter summaries, and summarize inventory.
-      Residents Data: ${JSON.stringify(residents)}
-      Inventory Data: ${JSON.stringify(inventory)}
+      You are an AI Assistant for Barangay Enrique JC Montilla, City of Tacurong, Philippines.
+      If asked to draft or formalize a blotter narrative, legal purpose, or resolution, write a clear, formal, objective Philippine barangay document text directly without markdown asterisks or extra commentary.
+      If asked an analytical question about census or inventory, use the live records below.
+      Residents Data: ${JSON.stringify(residents || [])}
+      Inventory Data: ${JSON.stringify(inventory || [])}
     `;
 
     const result = await model.generateContent(`${context}\n\nRequest: ${prompt}`);
-    return NextResponse.json({ reply: result.response.text() });
-  } catch (error) {
-    return NextResponse.json({ error: 'AI service unavailable.' }, { status: 500 });
+    const text = result.response.text();
+
+    return NextResponse.json({ reply: text });
+  } catch (error: any) {
+    console.error('AI Route Error:', error);
+    return NextResponse.json(
+      { error: error?.message || 'Failed to connect to Gemini AI service.' },
+      { status: 500 }
+    );
   }
 }
