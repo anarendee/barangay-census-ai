@@ -1,6 +1,15 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
+// Each model has its own separate Free Tier RPD quota in Google AI Studio.
+// If the primary model hits its daily limit (429), it immediately falls back to the next model.
+const MODEL_FALLBACK_CHAIN = [
+  'gemini-3.8-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+];
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     promise,
@@ -13,14 +22,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 export async function POST(req: NextRequest) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'GEMINI_API_KEY is missing in your .env.local file.' },
+        { error: 'GEMINI_API_KEY is missing in your environment variables.' },
         { status: 500 }
       );
     }
@@ -38,12 +45,11 @@ export async function POST(req: NextRequest) {
     const ai = new GoogleGenAI({ apiKey });
     let lastError: any = null;
 
-    // Retry gemini-3.8-flash up to 3 times with short backoff for temporary 503 demand spikes
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (const modelName of MODEL_FALLBACK_CHAIN) {
       try {
         const response = await withTimeout(
           ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+            model: modelName,
             contents: prompt,
             config: {
               systemInstruction:
@@ -51,24 +57,27 @@ export async function POST(req: NextRequest) {
               temperature: 0.3,
             },
           }),
-          20000 // 20-second timeout per attempt
+          15000 // 15s per model so Vercel never times out
         );
 
-        const reply = response.text || 'No response generated.';
-        return NextResponse.json({ reply });
+        const reply = response.text?.trim();
+        if (reply) {
+          return NextResponse.json({ reply, modelUsed: modelName });
+        }
       } catch (err: any) {
         lastError = err;
-        const status = err?.status || err?.code;
-        if ((status === 503 || status === 504 || status === 429) && attempt < 3) {
-          await sleep(1500 * attempt);
-          continue;
-        }
-        break;
+        console.warn(`Model ${modelName} failed (${err?.status || err?.message}), trying next model...`);
+        // Immediately move to the next model in MODEL_FALLBACK_CHAIN on 429, 503, or timeout
+        continue;
       }
     }
 
     return NextResponse.json(
-      { error: lastError?.message || 'AI service is temporarily busy. Please try again.' },
+      {
+        error:
+          lastError?.message ||
+          'All AI models are currently busy or out of daily quota. Please try again shortly.',
+      },
       { status: 503 }
     );
   } catch (err: any) {

@@ -141,7 +141,11 @@ export default function SecretaryDashboard() {
         }),
       });
       const data = await res.json();
-      setAiSuggestion(data.reply || data.error || 'Unable to generate recommendation.');
+      if (!res.ok || data.error) {
+        setAiSuggestion(`AI Error: ${data.error || 'Failed to get recommendation.'}`);
+        return;
+      }
+      setAiSuggestion(data.reply || 'No recommendation returned.');
     } catch {
       setAiSuggestion('Error connecting to AI assistant.');
     } finally {
@@ -165,7 +169,15 @@ export default function SecretaryDashboard() {
         }),
       });
       const data = await res.json();
-      if (data.reply) setNarrative(data.reply);
+      if (!res.ok || data.error) {
+        alert(`AI Error: ${data.error || 'Failed to format blotter narrative.'}`);
+        return;
+      }
+      if (data.reply) {
+        setNarrative(data.reply);
+      } else {
+        alert('AI returned an empty response. Please try again.');
+      }
     } catch {
       alert('AI narrative drafter unavailable right now.');
     } finally {
