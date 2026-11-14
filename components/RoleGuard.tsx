@@ -1,7 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, useRef } from 'react';
 import { createClient } from '@/lib/supabase';
 import { ShieldAlert, Loader2 } from 'lucide-react';
 
@@ -19,59 +18,48 @@ const ROLE_HOME: Record<BarangayRole, string> = {
 };
 
 export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
-  const supabase = createClient();
-  const router = useRouter();
-
   const [status, setStatus] = useState<'checking' | 'authorized' | 'unauthorized'>('checking');
   const [actualRole, setActualRole] = useState<BarangayRole | null>(null);
+  const hasChecked = useRef(false);
 
   useEffect(() => {
-    let isMounted = true;
+    if (hasChecked.current) return;
+    hasChecked.current = true;
 
     const verifyAccess = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-      if (!user) {
-        router.replace('/');
-        return;
-      }
-
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (!isMounted) return;
-
-      if (error || !profile?.role) {
-        setActualRole('secretary');
-        if (allowedRole === 'secretary') {
-          setStatus('authorized');
-        } else {
-          setStatus('unauthorized');
+        if (!user) {
+          window.location.replace('/');
+          return;
         }
-        return;
-      }
 
-      const userRole = String(profile.role).toLowerCase() as BarangayRole;
-      setActualRole(userRole);
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle();
 
-      if (userRole === allowedRole) {
-        setStatus('authorized');
-      } else {
-        setStatus('unauthorized');
+        if (error || !profile?.role) {
+          setActualRole('secretary');
+          setStatus(allowedRole === 'secretary' ? 'authorized' : 'unauthorized');
+          return;
+        }
+
+        const userRole = String(profile.role).toLowerCase() as BarangayRole;
+        setActualRole(userRole);
+        setStatus(userRole === allowedRole ? 'authorized' : 'unauthorized');
+      } catch {
+        window.location.replace('/');
       }
     };
 
     verifyAccess();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [allowedRole, router, supabase]);
+  }, [allowedRole]);
 
   if (status === 'checking') {
     return (
@@ -99,7 +87,7 @@ export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
           <div className="flex gap-2 pt-2">
             {actualRole && ROLE_HOME[actualRole] && (
               <button
-                onClick={() => router.replace(ROLE_HOME[actualRole])}
+                onClick={() => window.location.replace(ROLE_HOME[actualRole])}
                 className="flex-1 bg-blue-700 hover:bg-blue-800 text-white py-2.5 rounded-lg text-xs font-semibold"
               >
                 Go to My Portal
@@ -107,8 +95,9 @@ export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
             )}
             <button
               onClick={async () => {
+                const supabase = createClient();
                 await supabase.auth.signOut();
-                router.replace('/');
+                window.location.replace('/');
               }}
               className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-semibold"
             >
