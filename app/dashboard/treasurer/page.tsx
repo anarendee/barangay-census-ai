@@ -2,303 +2,399 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase';
-import { DollarSign, Package, LogOut, CheckCircle2, Receipt } from 'lucide-react';
+import {
+  Receipt,
+  Clock,
+  LogOut,
+  Search,
+  FileCheck2,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function TreasurerDashboard() {
   const supabase = createClient();
   const router = useRouter();
+
   const [pendingCerts, setPendingCerts] = useState<any[]>([]);
-  const [recentPayments, setRecentPayments] = useState<any[]>([]);
-  const [inventory, setInventory] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [selectedCert, setSelectedCert] = useState<any | null>(null);
 
-  // Stores manual OR Number per certificate ID
-  const [orNumbers, setOrNumbers] = useState<{ [certId: string]: string }>({});
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  // Payment Form State
+  const [orNumber, setOrNumber] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [payerName, setPayerName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  // Inventory Form
-  const [itemName, setItemName] = useState('');
-  const [category, setCategory] = useState('Office Supplies');
-  const [quantity, setQuantity] = useState('1');
-  const [unit, setUnit] = useState('pcs');
+  // Search Ledger
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    loadData();
+    fetchTreasuryData();
   }, []);
 
-  const loadData = async () => {
-    const { data: certs } = await supabase
+  const fetchTreasuryData = async () => {
+    // 1. Fetch certificates awaiting payment
+    const { data: pendingData, error: pendingErr } = await supabase
       .from('certificates')
-      .select('*, residents(first_name, last_name, households(purok))')
+      .select('*, residents(first_name, middle_name, last_name, suffix, households(purok))')
       .eq('status', 'pending_payment')
       .order('created_at', { ascending: false });
 
-    const { data: paid } = await supabase
+    if (pendingErr) console.error('Pending certs error:', pendingErr.message);
+    if (pendingData) setPendingCerts(pendingData);
+
+    // 2. Fetch completed payments ledger (with fallback if join fails)
+    const { data: paymentData, error: paymentErr } = await supabase
       .from('payments')
-      .select('*, certificates(control_number, certificate_type, residents(first_name, last_name))')
-      .order('paid_at', { ascending: false })
-      .limit(10);
+      .select('*, certificates(control_number, certificate_type, purpose, residents(first_name, last_name))')
+      .order('created_at', { ascending: false });
 
-    const { data: inv } = await supabase
-      .from('inventory')
-      .select('*')
-      .order('updated_at', { ascending: false });
-
-    if (certs) setPendingCerts(certs);
-    if (paid) setRecentPayments(paid);
-    if (inv) setInventory(inv);
-  };
-
-  const handleOrChange = (certId: string, value: string) => {
-    setOrNumbers((prev) => ({ ...prev, [certId]: value }));
-  };
-
-  const handleReceivePayment = async (cert: any) => {
-    const enteredOr = (orNumbers[cert.id] || '').trim().toUpperCase();
-
-    if (!enteredOr) {
-      alert('Please enter the physical Official Receipt (OR) Number before confirming payment.');
-      return;
+    if (paymentErr) {
+      console.error('Payments join error:', paymentErr.message);
+      const { data: fallbackPayments } = await supabase
+        .from('payments')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (fallbackPayments) setPayments(fallbackPayments);
+    } else if (paymentData) {
+      setPayments(paymentData);
     }
+  };
 
-    setProcessingId(cert.id);
+  const handleSelectCert = (cert: any) => {
+    setSelectedCert(cert);
+    const fullName = `${cert.residents?.first_name || ''} ${cert.residents?.last_name || ''}`.trim();
+    setPayerName(fullName);
+    setOrNumber(`OR-${Date.now().toString().slice(-6)}`);
+  };
 
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCert || !orNumber.trim()) return;
+    setSubmitting(true);
+
+    // 1. Insert payment record
     const { error: payError } = await supabase.from('payments').insert({
-      certificate_id: cert.id,
-      or_number: enteredOr,
-      amount_paid: cert.fee,
+      certificate_id: selectedCert.id,
+      or_number: orNumber.trim(),
+      amount_paid: parseFloat(selectedCert.fee) || 0,
+      payment_method: paymentMethod,
+      payer_name: payerName.trim(),
     });
 
     if (payError) {
-      setProcessingId(null);
-      if (payError.code === '23505') {
-        alert(`Error: Official Receipt Number "${enteredOr}" has already been recorded in the system.`);
-      } else {
-        alert(`Failed to record payment: ${payError.message}`);
-      }
+      alert(`Error recording payment: ${payError.message}`);
+      setSubmitting(false);
       return;
     }
 
-    await supabase.from('certificates').update({ status: 'paid' }).eq('id', cert.id);
+    // 2. Update certificate status to 'paid' so Secretary can print
+    const { error: certError } = await supabase
+      .from('certificates')
+      .update({ status: 'paid' })
+      .eq('id', selectedCert.id);
 
-    setOrNumbers((prev) => {
-      const updated = { ...prev };
-      delete updated[cert.id];
-      return updated;
-    });
+    if (certError) {
+      alert(`Payment saved, but certificate status update failed: ${certError.message}`);
+    } else {
+      alert(`Official Receipt ${orNumber} recorded! Certificate is now unlocked for printing.`);
+    }
 
-    setProcessingId(null);
-    loadData();
-    alert(`Payment recorded! Official Receipt ${enteredOr} linked to ${cert.control_number}.`);
+    setSelectedCert(null);
+    setOrNumber('');
+    setPayerName('');
+    setSubmitting(false);
+    fetchTreasuryData();
   };
 
-  const handleAddInventory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await supabase.from('inventory').insert({
-      item_name: itemName,
-      category,
-      quantity: parseInt(quantity),
-      unit,
-    });
-    setItemName('');
-    setQuantity('1');
-    loadData();
-  };
+  const totalCollections = payments.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
+
+  const todayStr = new Date().toDateString();
+  const todayCollections = payments
+    .filter((p) => p.created_at && new Date(p.created_at).toDateString() === todayStr)
+    .reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
+
+  const filteredPayments = payments.filter((p) => {
+    const query = searchQuery.toLowerCase();
+    const fallbackResident = `${p.certificates?.residents?.first_name || ''} ${p.certificates?.residents?.last_name || ''}`.trim();
+    const displayPayor = (p.payer_name || fallbackResident).toLowerCase();
+
+    return (
+      (p.or_number || '').toLowerCase().includes(query) ||
+      displayPayor.includes(query) ||
+      (p.certificates?.control_number || '').toLowerCase().includes(query) ||
+      (p.certificates?.certificate_type || '').toLowerCase().includes(query)
+    );
+  });
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        <header className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="bg-white p-5 rounded-xl border shadow-sm flex flex-wrap justify-between items-center gap-4">
           <div>
-            <h1 className="text-xl font-bold text-slate-800">Barangay Treasurer Portal</h1>
-            <p className="text-xs text-slate-500">Official Receipt Collection & Barangay Asset Inventory</p>
+            <h1 className="text-xl font-bold text-slate-900">Barangay Treasurer Portal</h1>
+            <p className="text-xs text-slate-500">
+              Barangay Enrique JC Montilla • Official Receipt (OR) &amp; Revenue Collection
+            </p>
           </div>
           <button
             onClick={async () => {
               await supabase.auth.signOut();
               router.push('/');
             }}
-            className="text-red-600 flex items-center gap-1 text-sm font-medium hover:underline"
+            className="text-red-600 flex items-center gap-1 text-sm font-medium hover:text-red-700"
           >
-            <LogOut size={16} /> Logout
+            <LogOut className="w-4 h-4" /> Logout
           </button>
-        </header>
+        </div>
 
-        {/* Pending Payments with Manual OR Input */}
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h2 className="font-bold text-lg mb-1 flex items-center gap-2 text-emerald-700">
-            <DollarSign size={20} /> Pending Certificate Collections
-          </h2>
-          <p className="text-xs text-slate-500 mb-4">
-            Enter the exact serial number from the physical Accountable Form No. 51 (OR) booklet to clear each request.
-          </p>
+        {/* Summary KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white p-5 rounded-xl border shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-slate-500 uppercase">Awaiting Payment</p>
+              <p className="text-2xl font-bold text-amber-600 mt-1">{pendingCerts.length}</p>
+            </div>
+            <div className="p-3 bg-amber-50 text-amber-600 rounded-lg">
+              <Clock className="w-6 h-6" />
+            </div>
+          </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="bg-white p-5 rounded-xl border shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-slate-500 uppercase">Today&apos;s Collections</p>
+              <p className="text-2xl font-bold text-emerald-600 mt-1">
+                ₱{todayCollections.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            {/* Philippine Peso Badge replacing DollarSign */}
+            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center font-bold text-2xl">
+              ₱
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-slate-500 uppercase">Total Recorded Revenue</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">
+                ₱{totalCollections.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
+              <Receipt className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+
+        {/* Main Workspace: Pending Queue + Payment Terminal */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Pending Payment Queue */}
+          <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm overflow-x-auto">
+            <h2 className="font-bold text-base text-slate-900 mb-4">Certificates Awaiting Payment</h2>
+            <table className="w-full text-left border-collapse text-sm">
               <thead>
-                <tr className="border-b text-slate-500">
-                  <th className="py-2">Control No</th>
-                  <th>Payee</th>
-                  <th>Document</th>
-                  <th>Amount Due</th>
-                  <th>Physical OR Number</th>
-                  <th>Action</th>
+                <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
+                  <th className="p-3">Control No</th>
+                  <th className="p-3">Applicant</th>
+                  <th className="p-3">Certificate</th>
+                  <th className="p-3">Fee</th>
+                  <th className="p-3">Action</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y">
                 {pendingCerts.map((cert) => (
-                  <tr key={cert.id} className="border-b">
-                    <td className="py-3 font-mono text-xs">{cert.control_number}</td>
-                    <td className="font-medium">
-                      {cert.residents?.first_name} {cert.residents?.last_name}
+                  <tr
+                    key={cert.id}
+                    className={`hover:bg-slate-50 ${
+                      selectedCert?.id === cert.id ? 'bg-emerald-50/60' : ''
+                    }`}
+                  >
+                    <td className="p-3 font-mono font-semibold text-xs">{cert.control_number}</td>
+                    <td className="p-3">
+                      <div className="font-medium text-slate-900">
+                        {cert.residents?.first_name} {cert.residents?.last_name}
+                      </div>
+                      <div className="text-xs text-slate-500">{cert.residents?.households?.purok}</div>
                     </td>
-                    <td>{cert.certificate_type}</td>
-                    <td className="font-bold text-slate-800">₱{cert.fee}</td>
-                    <td>
-                      <input
-                        type="text"
-                        placeholder="e.g. OR-8492015"
-                        value={orNumbers[cert.id] || ''}
-                        onChange={(e) => handleOrChange(cert.id, e.target.value)}
-                        className="border border-slate-300 px-2.5 py-1.5 rounded text-xs font-mono uppercase w-36 focus:ring-2 focus:ring-emerald-500 outline-none"
-                      />
+                    <td className="p-3">
+                      <div>{cert.certificate_type}</div>
+                      <div className="text-xs text-slate-500">{cert.purpose}</div>
                     </td>
-                    <td>
+                    <td className="p-3 font-semibold text-slate-900">
+                      ₱{Number(cert.fee || 0).toFixed(2)}
+                    </td>
+                    <td className="p-3">
                       <button
-                        onClick={() => handleReceivePayment(cert)}
-                        disabled={processingId === cert.id}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
+                        onClick={() => handleSelectCert(cert)}
+                        className="bg-emerald-600 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-emerald-700"
                       >
-                        {processingId === cert.id ? 'Saving...' : 'Confirm & Unlock'}
+                        Process OR
                       </button>
                     </td>
                   </tr>
                 ))}
                 {pendingCerts.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-6 text-center text-slate-400">
-                      No pending certificate payments at the moment.
+                    <td colSpan={5} className="p-6 text-center text-slate-400">
+                      No pending certificate payments in queue.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-        </div>
 
-        {/* Recent Official Receipts Log */}
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h2 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800">
-            <Receipt size={20} className="text-emerald-600" /> Recent Official Receipts Issued
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b text-slate-500">
-                  <th className="py-2">OR Number</th>
-                  <th>Control No</th>
-                  <th>Payee</th>
-                  <th>Document</th>
-                  <th>Amount Paid</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentPayments.map((pay) => (
-                  <tr key={pay.id} className="border-b">
-                    <td className="py-2.5 font-mono font-bold text-emerald-700 flex items-center gap-1">
-                      <CheckCircle2 size={14} /> {pay.or_number}
-                    </td>
-                    <td className="font-mono text-xs">{pay.certificates?.control_number}</td>
-                    <td>
-                      {pay.certificates?.residents?.first_name}{' '}
-                      {pay.certificates?.residents?.last_name}
-                    </td>
-                    <td>{pay.certificates?.certificate_type}</td>
-                    <td className="font-medium">₱{pay.amount_paid}</td>
-                  </tr>
-                ))}
-                {recentPayments.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="py-4 text-center text-slate-400">
-                      No Official Receipts recorded yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Inventory Management */}
-        <div className="grid md:grid-cols-3 gap-6">
-          <form onSubmit={handleAddInventory} className="bg-white p-6 rounded-xl shadow-sm space-y-3">
-            <h2 className="font-bold text-lg flex items-center gap-2 text-blue-700">
-              <Package size={20} /> Add Inventory Item
+          {/* Issue Official Receipt Form */}
+          <div className="bg-white p-6 rounded-xl border shadow-sm h-fit">
+            <h2 className="font-bold text-base text-slate-900 mb-1 flex items-center gap-2">
+              <FileCheck2 className="w-4 h-4 text-emerald-600" /> Issue Official Receipt
             </h2>
-            <input
-              placeholder="Item Name"
-              value={itemName}
-              onChange={(e) => setItemName(e.target.value)}
-              className="w-full border p-2 rounded text-sm"
-              required
-            />
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full border p-2 rounded text-sm"
-            >
-              <option>Office Supplies</option>
-              <option>Disaster & Rescue Gear</option>
-              <option>Medical Supplies</option>
-            </select>
-            <div className="grid grid-cols-2 gap-2">
+            <p className="text-xs text-slate-500 mb-4">
+              Select a pending request from the table to issue an OR and unlock printing.
+            </p>
+
+            {selectedCert ? (
+              <form onSubmit={handleRecordPayment} className="space-y-4">
+                <div className="p-3 bg-slate-50 rounded-lg border text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Control No:</span>
+                    <span className="font-mono font-semibold">{selectedCert.control_number}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Document:</span>
+                    <span className="font-medium">{selectedCert.certificate_type}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Amount Due:</span>
+                    <span className="font-bold text-emerald-600">
+                      ₱{Number(selectedCert.fee || 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Official Receipt (OR) Number
+                  </label>
+                  <input
+                    value={orNumber}
+                    onChange={(e) => setOrNumber(e.target.value)}
+                    placeholder="OR-123456"
+                    className="w-full border p-2.5 rounded text-sm font-mono"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Payor Name
+                  </label>
+                  <input
+                    value={payerName}
+                    onChange={(e) => setPayerName(e.target.value)}
+                    className="w-full border p-2.5 rounded text-sm"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Payment Method
+                  </label>
+                  <select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    className="w-full border p-2.5 rounded text-sm"
+                  >
+                    <option value="Cash">Cash</option>
+                    <option value="GCash / E-Wallet">GCash / E-Wallet</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                  </select>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="flex-1 bg-emerald-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {submitting ? 'Saving...' : 'Confirm Payment'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCert(null)}
+                    className="px-4 py-2.5 bg-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-300"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="p-6 text-center border border-dashed rounded-lg text-xs text-slate-400">
+                Click <strong>Process OR</strong> next to any pending certificate on the left to begin.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Completed Payments Ledger */}
+        <div className="bg-white p-6 rounded-xl border shadow-sm overflow-x-auto">
+          <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+            <h2 className="font-bold text-base text-slate-900">Official Receipt Collection Ledger</h2>
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
-                type="number"
-                placeholder="Qty"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                className="border p-2 rounded text-sm"
-                required
-              />
-              <input
-                placeholder="Unit (boxes, pcs)"
-                value={unit}
-                onChange={(e) => setUnit(e.target.value)}
-                className="border p-2 rounded text-sm"
-                required
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search OR #, payor, control #..."
+                className="border pl-9 pr-3 py-1.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium text-sm"
-            >
-              Record Asset
-            </button>
-          </form>
+          </div>
 
-          <div className="md:col-span-2 bg-white p-6 rounded-xl shadow-sm">
-            <h2 className="font-bold text-lg mb-4">Barangay Supplies & Equipment Inventory</h2>
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b text-slate-500">
-                  <th className="py-2">Item</th>
-                  <th>Category</th>
-                  <th>Stock</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inventory.map((item) => (
-                  <tr key={item.id} className="border-b">
-                    <td className="py-2 font-medium">{item.item_name}</td>
-                    <td>{item.category}</td>
-                    <td>
-                      {item.quantity} {item.unit}
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
+                <th className="p-3">OR Number</th>
+                <th className="p-3">Control No</th>
+                <th className="p-3">Payor</th>
+                <th className="p-3">Document Paid</th>
+                <th className="p-3">Method</th>
+                <th className="p-3">Amount</th>
+                <th className="p-3">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {filteredPayments.map((pay) => {
+                const fallbackResident = `${pay.certificates?.residents?.first_name || ''} ${pay.certificates?.residents?.last_name || ''}`.trim();
+                return (
+                  <tr key={pay.id} className="hover:bg-slate-50">
+                    <td className="p-3 font-mono font-semibold text-emerald-700">{pay.or_number}</td>
+                    <td className="p-3 font-mono text-xs">
+                      {pay.certificates?.control_number || '—'}
+                    </td>
+                    <td className="p-3 font-medium text-slate-900">
+                      {pay.payer_name || fallbackResident || '—'}
+                    </td>
+                    <td className="p-3">{pay.certificates?.certificate_type || '—'}</td>
+                    <td className="p-3 text-xs">{pay.payment_method}</td>
+                    <td className="p-3 font-semibold">₱{Number(pay.amount_paid || 0).toFixed(2)}</td>
+                    <td className="p-3 text-xs text-slate-500">
+                      {pay.created_at ? new Date(pay.created_at).toLocaleDateString() : '—'}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                );
+              })}
+              {filteredPayments.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="p-6 text-center text-slate-400">
+                    No Official Receipts recorded yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

@@ -1,72 +1,80 @@
-﻿import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { GoogleGenAI } from '@google/genai';
 
-export async function POST(req: Request) {
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(Object.assign(new Error('Request timed out'), { status: 504 })),
+        ms
+      )
+    ),
+  ]);
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function POST(req: NextRequest) {
   try {
-    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'GEMINI_API_KEY is missing in environment variables.' },
+        { error: 'GEMINI_API_KEY is missing in your .env.local file.' },
         { status: 500 }
       );
     }
 
-    const { prompt } = await req.json();
-    if (!prompt) {
-      return NextResponse.json({ error: 'Prompt is required.' }, { status: 400 });
-    }
+    const body = await req.json();
+    const prompt = body?.prompt;
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-
-    const { data: residents } = await supabase
-      .from('residents')
-      .select('first_name, last_name, gender, civil_status, occupation, is_voter, is_pwd, is_senior, is_4ps, households(purok, monthly_income)');
-
-    const { data: inventory } = await supabase.from('inventory').select('*');
-
-    const systemPrompt = `
-      You are an AI Assistant for Barangay Enrique JC Montilla, City of Tacurong, Philippines.
-      If asked to draft or formalize a blotter narrative, legal purpose, or resolution, write a clear, formal, objective Philippine barangay document text directly without markdown asterisks or extra commentary.
-      If asked an analytical question about census or inventory, use the live records below.
-      Residents Data: ${JSON.stringify(residents || [])}
-      Inventory Data: ${JSON.stringify(inventory || [])}
-    `;
-
-    const geminiRes = await fetch(
-      'https://googleapis.com',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: `${systemPrompt}\n\nRequest: ${prompt}` }],
-            },
-          ],
-        }),
-      }
-    );
-
-    const geminiData = await geminiRes.json();
-
-    if (!geminiRes.ok) {
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return NextResponse.json(
-        { error: geminiData?.error?.message || `Gemini API returned status ${geminiRes.status}` },
-        { status: geminiRes.status }
+        { error: 'A valid prompt string is required.' },
+        { status: 400 }
       );
     }
 
-    const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
-    return NextResponse.json({ reply: text });
-  } catch (error: any) {
+    const ai = new GoogleGenAI({ apiKey });
+    let lastError: any = null;
+
+    // Retry gemini-3.8-flash up to 3 times with short backoff for temporary 503 demand spikes
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await withTimeout(
+          ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: prompt,
+            config: {
+              systemInstruction:
+                'You are an official AI assistant for Barangay Enrique JC Montilla, City of Tacurong, Sultan Kudarat. Provide clear, accurate, concise, and actionable governance, census, and administrative assistance.',
+              temperature: 0.3,
+            },
+          }),
+          20000 // 20-second timeout per attempt
+        );
+
+        const reply = response.text || 'No response generated.';
+        return NextResponse.json({ reply });
+      } catch (err: any) {
+        lastError = err;
+        const status = err?.status || err?.code;
+        if ((status === 503 || status === 504 || status === 429) && attempt < 3) {
+          await sleep(1500 * attempt);
+          continue;
+        }
+        break;
+      }
+    }
+
     return NextResponse.json(
-      { error: error?.message || 'Failed to connect to Gemini AI service.' },
+      { error: lastError?.message || 'AI service is temporarily busy. Please try again.' },
+      { status: 503 }
+    );
+  } catch (err: any) {
+    console.error('AI Route Error:', err);
+    return NextResponse.json(
+      { error: err?.message || 'Failed to process AI request.' },
       { status: 500 }
     );
   }

@@ -129,7 +129,7 @@ export default function SecretaryDashboard() {
 
     const residentObj = residents.find((r) => r.id === selectedResident);
     const residentContext = residentObj
-      ? `Selected Resident: ${residentObj.first_name} ${residentObj.last_name}, Occupation: ${residentObj.occupation || 'None'}, Senior: ${residentObj.is_senior}, PWD: ${residentObj.is_pwd}, 4Ps: ${residentObj.is_4ps}, Active Blotters: ${activeBlottersForSelected.length}.`
+      ? `Selected Resident: ${residentObj.first_name} ${residentObj.last_name}, Occupation: ${residentObj.occupation || 'N/A'}, Senior: ${residentObj.is_senior}, PWD: ${residentObj.is_pwd}, 4Ps: ${residentObj.is_4ps}`
       : 'No specific resident selected yet.';
 
     try {
@@ -137,7 +137,7 @@ export default function SecretaryDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `As a Philippine Barangay Secretary Assistant, recommend the exact certificate type from our list (Barangay Clearance, Certificate of Indigency, Certificate of Residency, Certificate of Good Moral Character, Barangay Business Clearance, First-Time Jobseeker Certification (RA 11261), Certificate of Solo Parent, Certificate of File Action (CFA), Certificate of No Blotter / No Derogatory Record), state whether the fee should be waived (e.g., RA 11261, Indigency, 4Ps, Senior/PWD), warn if active blotters block clearance, and provide a 1-sentence formal purpose phrase. ${residentContext} Scenario: ${aiQuery}`,
+          prompt: `As a Philippine Barangay Secretary Assistant, recommend the exact certificate type from our list (Barangay Clearance, Certificate of Indigency, Certificate of Residency, Certificate of Good Moral Character, Barangay Business Clearance, First-Time Jobseeker Certification (RA 11261), Certificate of Solo Parent, Certificate of File Action (CFA), Certificate of No Blotter / No Derogatory Record), legal fee exemption if applicable, and formal purpose phrasing. Context: ${residentContext}. Request: ${aiQuery}`,
         }),
       });
       const data = await res.json();
@@ -161,7 +161,7 @@ export default function SecretaryDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `Rewrite the following rough incident notes into a formal, objective Philippine Katarungang Pambarangay Blotter entry (third-person legal/administrative tone, clear chronology, no embellishment). Incident Type: ${incidentType}. Complainant: ${complainantName || 'Complainant'}. Notes: ${narrative}`,
+          prompt: `Rewrite the following rough incident notes into a formal, objective Philippine Katarungang Pambarangay blotter log entry in third-person legal tone:\n\n${narrative}`,
         }),
       });
       const data = await res.json();
@@ -215,13 +215,11 @@ export default function SecretaryDashboard() {
   const handleAddResident = async (e: React.FormEvent) => {
     e.preventDefault();
     let photoUrl = '';
-
     if (photoFile) {
       const fileName = `${Date.now()}-${photoFile.name}`;
       const { data: uploadData } = await supabase.storage
         .from('resident-photos')
         .upload(fileName, photoFile);
-
       if (uploadData) {
         const { data: publicUrl } = supabase.storage
           .from('resident-photos')
@@ -273,7 +271,6 @@ export default function SecretaryDashboard() {
     setIsPwd(false);
     setIs4ps(false);
     setPhotoFile(null);
-
     fetchData();
     alert('Resident and Household census record saved!');
   };
@@ -288,7 +285,7 @@ export default function SecretaryDashboard() {
     e.preventDefault();
     if (isBlockedByBlotter) {
       alert(
-        'ISSUANCE BLOCKED: This resident has an active/unresolved Barangay Blotter case. Settle or dismiss the blotter case first, or issue a Certificate of File Action (CFA).'
+        'ISSUANCE BLOCKED: This resident has an active/unresolved Barangay Blotter case. Settle or dismiss the blotter case first before issuing clearances.'
       );
       return;
     }
@@ -323,24 +320,24 @@ export default function SecretaryDashboard() {
     switch (cert.certificate_type) {
       case 'First-Time Jobseeker Certification (RA 11261)':
         return (
-          <p className="mb-6 leading-relaxed indent-8 text-justify">
+          <p>
             This is to certify that <strong>{fullName}</strong>, of legal age, Filipino, and a bona fide resident of{' '}
-            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, is a qualified
-            First-Time Jobseeker pursuant to <strong>Republic Act No. 11261</strong> (First Time Jobseekers
-            Assistance Act) and is hereby exempted from paying barangay fees and charges.
+            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, is a qualified First-Time
+            Jobseeker pursuant to <strong>Republic Act No. 11261</strong> (First Time Jobseekers Assistance Act) and is
+            hereby exempted from paying barangay fees and charges.
           </p>
         );
       case 'Certificate of Good Moral Character':
         return (
-          <p className="mb-6 leading-relaxed indent-8 text-justify">
+          <p>
             This is to certify that <strong>{fullName}</strong>, of legal age, Filipino, and a resident of{' '}
-            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, is known to be of
-            good moral character, law-abiding, and a respected member of the community.
+            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, is known to be of good
+            moral character, law-abiding, and a respected member of the community.
           </p>
         );
       case 'Barangay Business Clearance':
         return (
-          <p className="mb-6 leading-relaxed indent-8 text-justify">
+          <p>
             This is to certify that <strong>{fullName}</strong>, operating within <strong>{residentPurok}</strong>,
             Barangay Enrique JC Montilla, City of Tacurong, is hereby granted clearance to operate a lawful business
             establishment subject to existing barangay ordinances and national laws.
@@ -348,33 +345,32 @@ export default function SecretaryDashboard() {
         );
       case 'Certificate of Solo Parent':
         return (
-          <p className="mb-6 leading-relaxed indent-8 text-justify">
+          <p>
             This is to certify that <strong>{fullName}</strong>, of legal age, Filipino, and a bona fide resident of{' '}
-            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, is personally known
-            to be a Solo Parent solely raising and supporting their dependent child/children.
+            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, is personally known to be
+            a Solo Parent solely raising and supporting their dependent child/children.
           </p>
         );
       case 'Certificate of File Action (CFA)':
         return (
-          <p className="mb-6 leading-relaxed indent-8 text-justify">
+          <p>
             This is to certify that the complaint filed by <strong>{fullName}</strong> of{' '}
-            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, underwent mediation
-            and conciliation proceedings before the Lupong Tagapamayapa, and no settlement was reached; hence, the
+            <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong, underwent mediation and
+            conciliation proceedings before the Lupong Tagapamayapa, and no settlement was reached; hence, the
             corresponding complaint may now be filed in court/proper government office.
           </p>
         );
       case 'Certificate of No Blotter / No Derogatory Record':
         return (
-          <p className="mb-6 leading-relaxed indent-8 text-justify">
+          <p>
             This is to certify that based on the official Barangay Blotter and Katarungang Pambarangay records,{' '}
-            <strong>{fullName}</strong>, a bona fide resident of <strong>{residentPurok}</strong>, Barangay Enrique
-            JC Montilla, City of Tacurong, has <strong>NO PENDING CASE OR DEROGATORY RECORD</strong> on file as of
-            this date.
+            <strong>{fullName}</strong>, a bona fide resident of <strong>{residentPurok}</strong>, Barangay Enrique JC
+            Montilla, City of Tacurong, has <strong>NO PENDING CASE OR DEROGATORY RECORD</strong> on file as of this date.
           </p>
         );
       default:
         return (
-          <p className="mb-6 leading-relaxed indent-8 text-justify">
+          <p>
             This is to certify that <strong>{fullName}</strong>, of legal age, Filipino, is a bona fide resident of{' '}
             <strong>{residentPurok}</strong>, Barangay Enrique JC Montilla, City of Tacurong.
           </p>
@@ -383,76 +379,70 @@ export default function SecretaryDashboard() {
   };
 
   const filteredResidents = residents.filter((r) => {
-    const matchesSearch =
-      `${r.first_name} ${r.middle_name || ''} ${r.last_name} ${r.occupation || ''}`
-        .toLowerCase()
-        .includes(searchQuery.toLowerCase());
+    const matchesSearch = `${r.first_name} ${r.middle_name || ''} ${r.last_name} ${r.occupation || ''}`
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
     const matchesPurok = purokFilter === 'All' || r.households?.purok === purokFilter;
     return matchesSearch && matchesPurok;
   });
 
   if (printData) {
     const verifyUrl = `${originUrl}/verify/${printData.control_number}`;
-
     return (
-      <div className="p-8 bg-white min-h-screen text-black">
-        <div className="mb-6 flex gap-4 print:hidden">
+      <div className="min-h-screen bg-slate-100 p-8 print:bg-white print:p-0">
+        <div className="max-w-3xl mx-auto mb-6 flex justify-between print:hidden">
           <button
             onClick={() => window.print()}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium"
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium hover:bg-blue-700"
           >
-            <Printer size={18} /> Print Official Copy
+            <Printer className="w-4 h-4" /> Print Official Copy
           </button>
           <button
             onClick={() => setPrintData(null)}
-            className="bg-slate-200 px-4 py-2 rounded-lg font-medium"
+            className="bg-slate-200 px-4 py-2 rounded-lg font-medium hover:bg-slate-300"
           >
             Back to Dashboard
           </button>
         </div>
 
-        <div className="w-[210mm] mx-auto border-2 border-black p-12 font-serif relative">
-          <div className="text-center border-b-2 border-black pb-4 mb-8">
-            <p className="text-sm">Republic of the Philippines</p>
+        <div className="max-w-3xl mx-auto bg-white p-12 border border-slate-300 shadow-lg print:shadow-none print:border-none">
+          <div className="text-center border-b-2 border-slate-800 pb-4 mb-8">
+            <p className="text-sm uppercase tracking-widest">Republic of the Philippines</p>
             <p className="text-sm">Province of Sultan Kudarat • City of Tacurong</p>
-            <h2 className="text-xl font-bold uppercase mt-1">Office of the Punong Barangay</h2>
-            <p className="text-xs uppercase tracking-wider mt-1">Barangay Enrique JC Montilla</p>
+            <p className="text-sm font-semibold">Office of the Punong Barangay</p>
+            <h1 className="text-2xl font-bold uppercase mt-1">Barangay Enrique JC Montilla</h1>
           </div>
 
-          <div className="flex justify-between items-start mb-6">
-            <div>
-              <h1 className="text-2xl font-bold underline uppercase">
-                {printData.certificate_type}
-              </h1>
-              <p className="mt-6 font-bold">TO WHOM IT MAY CONCERN:</p>
+          <h2 className="text-xl font-bold text-center uppercase tracking-wider underline mb-8">
+            {printData.certificate_type}
+          </h2>
+
+          <div className="flex justify-between items-start gap-6 mb-6">
+            <div className="space-y-4 text-justify leading-relaxed text-base flex-1">
+              <p className="font-semibold">TO WHOM IT MAY CONCERN:</p>
+              {renderCertificateBody(printData)}
+              <p>
+                This certification is issued upon the request of the interested party for{' '}
+                <strong>{printData.purpose.toUpperCase()}</strong>.
+              </p>
             </div>
 
             {printData.residents?.photo_url && (
-              <div className="border border-black p-1 text-center shrink-0">
+              <div className="w-28 h-28 border border-slate-400 shrink-0 overflow-hidden">
                 <img
                   src={printData.residents.photo_url}
-                  alt="Resident ID"
-                  className="w-24 h-24 object-cover"
+                  alt="Applicant Photo"
+                  className="w-full h-full object-cover"
                 />
-                <p className="text-[9px] uppercase mt-1 font-sans">Applicant Photo</p>
               </div>
             )}
           </div>
 
-          {renderCertificateBody(printData)}
-
-          <p className="mb-12 leading-relaxed indent-8 text-justify">
-            This certification is issued upon the request of the interested party for{' '}
-            <strong>{printData.purpose.toUpperCase()}</strong>.
-          </p>
-
-          <div className="mt-16 flex justify-between items-end">
-            <div className="flex items-center gap-4">
-              <div className="border border-black p-1.5 bg-white">
-                <QRCodeSVG value={verifyUrl} size={76} />
-              </div>
-              <div className="text-xs space-y-1 font-sans">
-                <p className="font-bold uppercase text-[10px] text-slate-600">Scan to Verify Authenticity</p>
+          <div className="mt-12 flex justify-between items-end">
+            <div className="flex items-center gap-3">
+              <QRCodeSVG value={verifyUrl} size={76} />
+              <div className="text-xs text-slate-600 space-y-1">
+                <p className="font-semibold text-slate-800">Scan to Verify Authenticity</p>
                 <p>
                   Control No: <strong>{printData.control_number}</strong>
                 </p>
@@ -466,7 +456,7 @@ export default function SecretaryDashboard() {
             </div>
 
             <div className="text-center">
-              <p className="font-bold underline uppercase">Hon. Juan Dela Cruz</p>
+              <p className="font-bold uppercase underline">Hon. Juan Dela Cruz</p>
               <p className="text-sm">Punong Barangay</p>
             </div>
           </div>
@@ -477,14 +467,12 @@ export default function SecretaryDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <header className="flex flex-wrap justify-between items-center bg-white p-4 rounded-xl shadow-sm gap-4">
+        <div className="bg-white p-5 rounded-xl border shadow-sm flex flex-wrap justify-between items-center gap-4">
           <div>
-            <h1 className="text-xl font-bold text-slate-800">Barangay Secretary Portal</h1>
-            <p className="text-xs text-slate-500">
-              Barangay Enrique JC Montilla • Census, Blotter & Issuance Desk
-            </p>
+            <h1 className="text-xl font-bold text-slate-900">Barangay Secretary Portal</h1>
+            <p className="text-xs text-slate-500">Barangay Enrique JC Montilla • Census, Blotter & Issuance Desk</p>
           </div>
           <button
             onClick={async () => {
@@ -493,268 +481,265 @@ export default function SecretaryDashboard() {
             }}
             className="text-red-600 flex items-center gap-1 text-sm font-medium hover:underline"
           >
-            <LogOut size={16} /> Logout
+            <LogOut className="w-4 h-4" /> Logout
           </button>
-        </header>
+        </div>
 
         {/* Tab Navigation */}
-        <div className="flex flex-wrap gap-2 bg-white p-2 rounded-xl shadow-sm">
+        <div className="bg-white p-2 rounded-xl border shadow-sm flex flex-wrap gap-2">
           <button
             onClick={() => setActiveTab('census')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === 'census'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
+              activeTab === 'census' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <UserPlus size={16} /> Resident & Household Census
+            <UserPlus className="w-4 h-4" /> Resident & Household Census
           </button>
           <button
             onClick={() => setActiveTab('certificates')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === 'certificates'
-                ? 'bg-emerald-600 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
+              activeTab === 'certificates' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <FileText size={16} /> Certificates & AI Helper ({certificates.length})
+            <FileText className="w-4 h-4" /> Certificates & AI Helper ({certificates.length})
           </button>
           <button
             onClick={() => setActiveTab('blotter')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === 'blotter'
-                ? 'bg-rose-600 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
+              activeTab === 'blotter' ? 'bg-rose-600 text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <Scale size={16} /> Blotter & Disputes (
+            <Scale className="w-4 h-4" /> Blotter & Disputes (
             {blotters.filter((b) => b.status === 'Pending' || b.status === 'Mediation').length} Active)
           </button>
           <button
             onClick={() => setActiveTab('directory')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === 'directory'
-                ? 'bg-slate-800 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
+              activeTab === 'directory' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <Users size={16} /> Residents Directory ({residents.length})
+            <Users className="w-4 h-4" /> Residents Directory ({residents.length})
           </button>
         </div>
 
         {/* TAB 1: FULL CENSUS ENCODING */}
         {activeTab === 'census' && (
-          <form onSubmit={handleAddResident} className="bg-white p-6 rounded-xl shadow-sm space-y-6">
-            <div className="border-b pb-3">
-              <h2 className="font-bold text-lg flex items-center gap-2 text-blue-700">
-                <UserPlus size={20} /> Encode Complete Resident & Household Profile
-              </h2>
-              <p className="text-xs text-slate-500">
-                All demographic attributes feed directly into the Admin AI Census Analyst.
-              </p>
-            </div>
+          <div className="bg-white p-6 rounded-xl border shadow-sm">
+            <h2 className="font-bold text-lg text-slate-900">Encode Complete Resident & Household Profile</h2>
+            <p className="text-xs text-slate-500 mb-6">
+              All demographic attributes feed directly into the Admin AI Census Analyst.
+            </p>
 
-            <div className="grid md:grid-cols-4 gap-3">
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">First Name *</label>
-                <input
-                  placeholder="Juan"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  className="w-full border p-2 rounded text-sm"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Middle Name</label>
-                <input
-                  placeholder="Reyes"
-                  value={middleName}
-                  onChange={(e) => setMiddleName(e.target.value)}
-                  className="w-full border p-2 rounded text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Last Name *</label>
-                <input
-                  placeholder="Dela Cruz"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  className="w-full border p-2 rounded text-sm"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Suffix</label>
-                <input
-                  placeholder="Jr., Sr., III"
-                  value={suffix}
-                  onChange={(e) => setSuffix(e.target.value)}
-                  className="w-full border p-2 rounded text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid md:grid-cols-4 gap-3">
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Birthdate *</label>
-                <input
-                  type="date"
-                  value={birthdate}
-                  onChange={(e) => setBirthdate(e.target.value)}
-                  className="w-full border p-2 rounded text-sm"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Gender *</label>
-                <select
-                  value={gender}
-                  onChange={(e) => setGender(e.target.value)}
-                  className="w-full border p-2 rounded text-sm"
-                >
-                  <option>Male</option>
-                  <option>Female</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Civil Status *</label>
-                <select
-                  value={civilStatus}
-                  onChange={(e) => setCivilStatus(e.target.value)}
-                  className="w-full border p-2 rounded text-sm"
-                >
-                  <option>Single</option>
-                  <option>Married</option>
-                  <option>Widowed</option>
-                  <option>Separated</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Contact Number</label>
-                <input
-                  placeholder="09XX-XXX-XXXX"
-                  value={contactNumber}
-                  onChange={(e) => setContactNumber(e.target.value)}
-                  className="w-full border p-2 rounded text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-4 rounded-lg border space-y-3">
-              <h3 className="text-xs font-bold uppercase text-slate-600 flex items-center gap-1">
-                <Building2 size={14} /> Household & Socio-Economic Data
-              </h3>
-              <div className="grid md:grid-cols-4 gap-3">
+            <form onSubmit={handleAddResident} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">Purok / Zone *</label>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">First Name *</label>
+                  <input
+                    placeholder="Juan"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Middle Name</label>
+                  <input
+                    placeholder="Reyes"
+                    value={middleName}
+                    onChange={(e) => setMiddleName(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Last Name *</label>
+                  <input
+                    placeholder="Dela Cruz"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Suffix</label>
+                  <input
+                    placeholder="Jr., Sr., III"
+                    value={suffix}
+                    onChange={(e) => setSuffix(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Birthdate *</label>
+                  <input
+                    type="date"
+                    value={birthdate}
+                    onChange={(e) => setBirthdate(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Gender *</label>
                   <select
-                    value={purok}
-                    onChange={(e) => setPurok(e.target.value)}
-                    className="w-full bg-white border p-2 rounded text-sm"
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
                   >
-                    <option>Purok 1</option>
-                    <option>Purok 2</option>
-                    <option>Purok 3</option>
-                    <option>Purok 4</option>
-                    <option>Purok 5</option>
-                    <option>Purok 6</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">House / Street Address</label>
-                  <input
-                    placeholder="Lot 4, Blk 2, Main St."
-                    value={addressLine}
-                    onChange={(e) => setAddressLine(e.target.value)}
-                    className="w-full bg-white border p-2 rounded text-sm"
-                  />
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Civil Status *</label>
+                  <select
+                    value={civilStatus}
+                    onChange={(e) => setCivilStatus(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                  >
+                    <option value="Single">Single</option>
+                    <option value="Married">Married</option>
+                    <option value="Widowed">Widowed</option>
+                    <option value="Separated">Separated</option>
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">Occupation</label>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Contact Number</label>
                   <input
-                    placeholder="Farmer, Teacher, Student..."
-                    value={occupation}
-                    onChange={(e) => setOccupation(e.target.value)}
-                    className="w-full bg-white border p-2 rounded text-sm"
+                    placeholder="09XX-XXX-XXXX"
+                    value={contactNumber}
+                    onChange={(e) => setContactNumber(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
                   />
                 </div>
+              </div>
+
+              <div className="bg-slate-50 p-4 rounded-lg border space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                  <Building2 className="w-4 h-4" /> Household & Socio-Economic Data
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Purok / Zone *</label>
+                    <select
+                      value={purok}
+                      onChange={(e) => setPurok(e.target.value)}
+                      className="w-full bg-white border p-2 rounded text-sm"
+                    >
+                      <option value="Purok 1">Purok 1</option>
+                      <option value="Purok 2">Purok 2</option>
+                      <option value="Purok 3">Purok 3</option>
+                      <option value="Purok 4">Purok 4</option>
+                      <option value="Purok 5">Purok 5</option>
+                      <option value="Purok 6">Purok 6</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">House / Street Address</label>
+                    <input
+                      placeholder="Lot 4, Blk 2, Main St."
+                      value={addressLine}
+                      onChange={(e) => setAddressLine(e.target.value)}
+                      className="w-full bg-white border p-2 rounded text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Occupation</label>
+                    <input
+                      placeholder="Farmer, Teacher, Student..."
+                      value={occupation}
+                      onChange={(e) => setOccupation(e.target.value)}
+                      className="w-full bg-white border p-2 rounded text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Monthly Household Income (₱)
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="10000"
+                      value={monthlyIncome}
+                      onChange={(e) => setMonthlyIncome(e.target.value)}
+                      className="w-full bg-white border p-2 rounded text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isVoter}
+                      onChange={(e) => setIsVoter(e.target.checked)}
+                      className="rounded"
+                    />
+                    Registered Voter
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isSenior}
+                      onChange={(e) => setIsSenior(e.target.checked)}
+                      className="rounded"
+                    />
+                    Senior Citizen
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isPwd}
+                      onChange={(e) => setIsPwd(e.target.checked)}
+                      className="rounded"
+                    />
+                    PWD
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={is4ps}
+                      onChange={(e) => setIs4ps(e.target.checked)}
+                      className="rounded"
+                    />
+                    4Ps Beneficiary
+                  </label>
+                </div>
+
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">Monthly Household Income (₱)</label>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Resident ID Photo (Optional)</label>
                   <input
-                    type="number"
-                    placeholder="10000"
-                    value={monthlyIncome}
-                    onChange={(e) => setMonthlyIncome(e.target.value)}
-                    className="w-full bg-white border p-2 rounded text-sm"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                    className="text-sm w-full border p-1.5 rounded bg-white"
                   />
                 </div>
               </div>
-            </div>
 
-            <div className="grid md:grid-cols-2 gap-4 items-center">
-              <div className="flex flex-wrap gap-4 text-sm bg-slate-50 p-3 rounded-lg border">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isVoter}
-                    onChange={(e) => setIsVoter(e.target.checked)}
-                  />
-                  Registered Voter
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isSenior}
-                    onChange={(e) => setIsSenior(e.target.checked)}
-                  />
-                  Senior Citizen
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isPwd}
-                    onChange={(e) => setIsPwd(e.target.checked)}
-                  />
-                  PWD
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={is4ps}
-                    onChange={(e) => setIs4ps(e.target.checked)}
-                  />
-                  4Ps Beneficiary
-                </label>
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Resident ID Photo (Optional)</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
-                  className="text-sm w-full border p-1.5 rounded bg-white"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-semibold transition"
-            >
-              Save Complete Resident & Household Record
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700"
+              >
+                Save Complete Resident & Household Record
+              </button>
+            </form>
+          </div>
         )}
 
         {/* TAB 2: CERTIFICATES & AI HELPER WITH BLOTTER AUTO-BLOCKING */}
         {activeTab === 'certificates' && (
           <div className="space-y-6">
-            <div className="bg-indigo-50 border border-indigo-200 p-5 rounded-xl space-y-3">
-              <h2 className="font-bold text-indigo-900 flex items-center gap-2 text-base">
-                <Sparkles size={18} className="text-indigo-600" /> AI Certificate Eligibility & Purpose Helper
-              </h2>
+            {/* AI Helper Card */}
+            <div className="bg-indigo-50/70 border border-indigo-200 p-5 rounded-xl space-y-3">
+              <div className="flex items-center gap-2 text-indigo-900 font-bold text-sm">
+                <Sparkles className="w-4 h-4 text-indigo-600" /> AI Certificate Eligibility & Purpose Helper
+              </div>
               <form onSubmit={handleAiAssist} className="flex flex-col sm:flex-row gap-2">
                 <input
                   value={aiQuery}
@@ -765,360 +750,155 @@ export default function SecretaryDashboard() {
                 <button
                   type="submit"
                   disabled={aiLoading}
-                  className="bg-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                  className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
                 >
                   {aiLoading ? 'Checking...' : 'Check Eligibility'}
                 </button>
               </form>
               {aiSuggestion && (
-                <div className="bg-white p-3.5 rounded-lg border border-indigo-100 text-sm text-slate-700 whitespace-pre-wrap">
+                <div className="bg-white p-4 rounded-lg border border-indigo-100 text-sm text-slate-700 whitespace-pre-wrap">
                   {aiSuggestion}
                 </div>
               )}
             </div>
 
-            <form
-              onSubmit={handleRequestCertificate}
-              className="bg-white p-6 rounded-xl shadow-sm space-y-4"
-            >
-              <h2 className="font-bold text-lg flex items-center gap-2 text-emerald-700">
-                <FileText size={20} /> Encode Certificate Request
-              </h2>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Encode Certificate Form */}
+              <div className="bg-white p-6 rounded-xl border shadow-sm h-fit">
+                <h2 className="font-bold text-base text-slate-900 mb-4">Encode Certificate Request</h2>
 
-              {/* Automatic Blotter Cross-Check Alert */}
-              {activeBlottersForSelected.length > 0 && (
-                <div className="bg-rose-50 border border-rose-300 p-4 rounded-xl flex items-start gap-3 text-rose-900">
-                  <ShieldAlert size={22} className="text-rose-600 shrink-0 mt-0.5" />
-                  <div className="text-xs space-y-1">
-                    <p className="font-bold text-sm">
-                      BLOTTER ALERT: {activeBlottersForSelected.length} Active / Unresolved Case(s) Found!
-                    </p>
-                    {activeBlottersForSelected.map((b) => (
-                      <p key={b.id}>
-                        • <span className="font-mono font-bold">{b.blotter_number}</span> ({b.incident_type}) — Status:{' '}
-                        <strong>{b.status}</strong>
-                      </p>
-                    ))}
-                    <p className="pt-1 font-medium">
-                      Clearance documents (Barangay Clearance, Good Moral, Business Clearance, No Derogatory Record) are automatically blocked until resolved.
+                {isBlockedByBlotter && (
+                  <div className="mb-4 p-3.5 bg-red-50 border border-red-300 rounded-lg text-xs text-red-800 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5 text-red-900">
+                      <ShieldAlert className="w-4 h-4 shrink-0" /> Issuance Blocked: Active Blotter Record Found
+                    </div>
+                    <p>
+                      This resident is listed as a respondent in {activeBlottersForSelected.length} unresolved blotter
+                      case(s) ({activeBlottersForSelected.map((b) => b.blotter_number).join(', ')}). Clear or settle the
+                      case in the Blotter tab before issuing clearances.
                     </p>
                   </div>
-                </div>
-              )}
+                )}
 
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Select Resident *</label>
-                  <select
-                    value={selectedResident}
-                    onChange={(e) => setSelectedResident(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                    required
+                <form onSubmit={handleRequestCertificate} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Select Resident *</label>
+                    <select
+                      value={selectedResident}
+                      onChange={(e) => setSelectedResident(e.target.value)}
+                      className="w-full border p-2.5 rounded text-sm"
+                      required
+                    >
+                      <option value="">-- Choose Registered Resident --</option>
+                      {residents.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.last_name}, {r.first_name} {r.suffix || ''} ({r.households?.purok || 'No Purok'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Certificate Type *</label>
+                    <select
+                      value={certType}
+                      onChange={(e) => handleCertTypeChange(e.target.value)}
+                      className="w-full border p-2.5 rounded text-sm"
+                    >
+                      {CERTIFICATE_OPTIONS.map((opt) => (
+                        <option key={opt.label} value={opt.label}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Purpose *</label>
+                    <input
+                      placeholder="e.g., Local Employment, DSWD Medical Assistance, Business Permit"
+                      value={purpose}
+                      onChange={(e) => setPurpose(e.target.value)}
+                      className="w-full border p-2.5 rounded text-sm"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Fee (PHP) — 0 = Waived/Free
+                    </label>
+                    <input
+                      type="number"
+                      value={fee}
+                      onChange={(e) => setFee(e.target.value)}
+                      className="w-full border p-2.5 rounded text-sm"
+                      required
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isBlockedByBlotter}
+                    className="w-full bg-emerald-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:bg-red-300 disabled:cursor-not-allowed"
                   >
-                    <option value="">-- Choose Registered Resident --</option>
-                    {residents.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.last_name}, {r.first_name} {r.suffix || ''} ({r.households?.purok || 'No Purok'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Certificate Type *</label>
-                  <select
-                    value={certType}
-                    onChange={(e) => handleCertTypeChange(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                  >
-                    {CERTIFICATE_OPTIONS.map((opt) => (
-                      <option key={opt.label} value={opt.label}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    {isBlockedByBlotter ? 'Blocked by Active Blotter Case' : 'Queue Certificate for Issuance'}
+                  </button>
+                </form>
               </div>
 
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-xs text-slate-500 mb-1">Purpose *</label>
-                  <input
-                    placeholder="e.g., Local Employment, DSWD Medical Assistance, Business Permit"
-                    value={purpose}
-                    onChange={(e) => setPurpose(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">
-                    Fee (PHP) — 0 = Waived/Free
-                  </label>
-                  <input
-                    type="number"
-                    value={fee}
-                    onChange={(e) => setFee(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                    required
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isBlockedByBlotter}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-rose-400 disabled:cursor-not-allowed text-white py-2.5 rounded-lg font-medium transition"
-              >
-                {isBlockedByBlotter
-                  ? 'Blocked Due to Active Blotter Case'
-                  : 'Queue Certificate for Issuance'}
-              </button>
-            </form>
-
-            {/* Certificate Queue Table */}
-            <div className="bg-white p-6 rounded-xl shadow-sm">
-              <h2 className="font-bold text-lg mb-4">Certificate Issuance Queue</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
+              {/* Certificate Queue Table */}
+              <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm overflow-x-auto">
+                <h2 className="font-bold text-base text-slate-900 mb-4">Certificate Issuance Queue</h2>
+                <table className="w-full text-left border-collapse text-sm">
                   <thead>
-                    <tr className="border-b text-slate-500">
-                      <th className="py-2">Control No</th>
-                      <th>Resident</th>
-                      <th>Document Type</th>
-                      <th>Fee</th>
-                      <th>Status</th>
-                      <th>Action</th>
+                    <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
+                      <th className="p-3">Control No</th>
+                      <th className="p-3">Resident</th>
+                      <th className="p-3">Document Type</th>
+                      <th className="p-3">Fee</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Action</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y">
                     {certificates.map((cert) => (
-                      <tr key={cert.id} className="border-b">
-                        <td className="py-3 font-mono text-xs">{cert.control_number}</td>
-                        <td className="font-medium">
+                      <tr key={cert.id} className="hover:bg-slate-50">
+                        <td className="p-3 font-mono font-semibold text-xs">{cert.control_number}</td>
+                        <td className="p-3">
                           {cert.residents?.first_name} {cert.residents?.last_name}
                         </td>
-                        <td>{cert.certificate_type}</td>
-                        <td>₱{cert.fee}</td>
-                        <td>
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
-                              cert.status === 'pending_payment'
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-emerald-100 text-emerald-800'
-                            }`}
-                          >
-                            {cert.status === 'pending_payment' ? (
-                              <Clock size={12} />
-                            ) : (
-                              <CheckCircle2 size={12} />
-                            )}
-                            {cert.status.replace('_', ' ').toUpperCase()}
-                          </span>
+                        <td className="p-3">{cert.certificate_type}</td>
+                        <td className="p-3">₱{cert.fee}</td>
+                        <td className="p-3">
+                          {cert.status === 'pending_payment' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800">
+                              <Clock className="w-3 h-3" /> Awaiting OR
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-800">
+                              <CheckCircle2 className="w-3 h-3" /> Ready ({cert.payments?.or_number || 'Waived'})
+                            </span>
+                          )}
                         </td>
-                        <td>
+                        <td className="p-3">
                           {cert.status !== 'pending_payment' ? (
                             <button
                               onClick={() => setPrintData(cert)}
-                              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1"
+                              className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium flex items-center gap-1 hover:bg-blue-700"
                             >
-                              <Printer size={14} /> Print with QR
+                              <Printer className="w-3.5 h-3.5" /> Print
                             </button>
                           ) : (
-                            <span className="text-xs text-slate-400">Awaiting Treasurer</span>
+                            <span className="text-xs text-slate-400">Pay at Treasurer</span>
                           )}
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: KATARUNGANG PAMBARANGAY BLOTTER & DISPUTE MANAGEMENT */}
-        {activeTab === 'blotter' && (
-          <div className="space-y-6">
-            <form onSubmit={handleAddBlotter} className="bg-white p-6 rounded-xl shadow-sm space-y-4">
-              <div className="border-b pb-3">
-                <h2 className="font-bold text-lg flex items-center gap-2 text-rose-700">
-                  <Scale size={20} /> Record Katarungang Pambarangay Blotter / Incident
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Linking a registered resident as Respondent automatically flags their profile in Certificate Issuance until settled.
-                </p>
-              </div>
-
-              <div className="grid md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Complainant Full Name *</label>
-                  <input
-                    placeholder="Name of person filing complaint"
-                    value={complainantName}
-                    onChange={(e) => setComplainantName(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">
-                    Respondent (Registered Resident)
-                  </label>
-                  <select
-                    value={respondentId}
-                    onChange={(e) => setRespondentId(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                  >
-                    <option value="">-- Non-Resident / Select Resident --</option>
-                    {residents.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.last_name}, {r.first_name} ({r.households?.purok || 'No Purok'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">
-                    Or External Respondent Name
-                  </label>
-                  <input
-                    placeholder="If respondent is not in census"
-                    value={respondentExternal}
-                    onChange={(e) => setRespondentExternal(e.target.value)}
-                    disabled={Boolean(respondentId)}
-                    className="w-full border p-2.5 rounded text-sm disabled:bg-slate-100"
-                  />
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Incident Category *</label>
-                  <select
-                    value={incidentType}
-                    onChange={(e) => setIncidentType(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                  >
-                    <option>Physical Injury / Altercation</option>
-                    <option>Boundary / Property Dispute</option>
-                    <option>Unpaid Debt / Estafa</option>
-                    <option>Noise / Public Disturbance</option>
-                    <option>Theft / Property Damage</option>
-                    <option>Domestic / Family Dispute</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Date & Time of Incident *</label>
-                  <input
-                    type="datetime-local"
-                    value={incidentDate}
-                    onChange={(e) => setIncidentDate(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Place of Incident *</label>
-                  <input
-                    placeholder="e.g., Purok 2 Basketball Court"
-                    value={incidentLocation}
-                    onChange={(e) => setIncidentLocation(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-xs text-slate-500">
-                    Incident Narrative / Statement of Facts *
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleDraftBlotterNarrative}
-                    disabled={draftingBlotter}
-                    className="text-xs bg-indigo-100 text-indigo-800 hover:bg-indigo-200 px-2.5 py-1 rounded flex items-center gap-1 font-medium"
-                  >
-                    <Sparkles size={13} />
-                    {draftingBlotter ? 'Drafting Formal Narrative...' : 'AI Formalize Narrative'}
-                  </button>
-                </div>
-                <textarea
-                  rows={4}
-                  placeholder="Type rough notes of what happened, then click 'AI Formalize Narrative' to convert into official legal blotter phrasing..."
-                  value={narrative}
-                  onChange={(e) => setNarrative(e.target.value)}
-                  className="w-full border p-2.5 rounded text-sm"
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full bg-rose-600 hover:bg-rose-700 text-white py-2.5 rounded-lg font-medium transition"
-              >
-                Save Official Blotter Record
-              </button>
-            </form>
-
-            {/* Blotter Log Table */}
-            <div className="bg-white p-6 rounded-xl shadow-sm">
-              <h2 className="font-bold text-lg mb-4">Barangay Blotter & Lupon Mediation Log</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="border-b text-slate-500">
-                      <th className="py-2">Blotter No</th>
-                      <th>Complainant</th>
-                      <th>Respondent</th>
-                      <th>Incident</th>
-                      <th>Status</th>
-                      <th>Update Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {blotters.map((b) => (
-                      <tr key={b.id} className="border-b">
-                        <td className="py-3 font-mono text-xs font-bold">{b.blotter_number}</td>
-                        <td>{b.complainant_name}</td>
-                        <td className="font-medium text-slate-800">{b.respondent_name}</td>
-                        <td>
-                          <p className="font-medium">{b.incident_type}</p>
-                          <p className="text-xs text-slate-500 line-clamp-1">{b.narrative}</p>
-                        </td>
-                        <td>
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${
-                              b.status === 'Settled' || b.status === 'Dismissed'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-rose-100 text-rose-800'
-                            }`}
-                          >
-                            {b.status.toUpperCase()}
-                          </span>
-                        </td>
-                        <td>
-                          <select
-                            value={b.status}
-                            onChange={(e) => handleUpdateBlotterStatus(b.id, e.target.value)}
-                            className="border p-1.5 rounded text-xs bg-white"
-                          >
-                            <option value="Pending">Pending</option>
-                            <option value="Mediation">Mediation</option>
-                            <option value="Settled">Settled</option>
-                            <option value="Escalated to CFA">Escalated to CFA</option>
-                            <option value="Dismissed">Dismissed</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                    {blotters.length === 0 && (
+                    {certificates.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-6 text-center text-slate-400">
-                          No blotter incidents recorded yet.
+                        <td colSpan={6} className="p-6 text-center text-slate-400">
+                          No certificates queued yet.
                         </td>
                       </tr>
                     )}
@@ -1129,17 +909,208 @@ export default function SecretaryDashboard() {
           </div>
         )}
 
-        {/* TAB 4: RESIDENTS DIRECTORY WITH BLOTTER BADGE */}
-        {activeTab === 'directory' && (
-          <div className="bg-white p-6 rounded-xl shadow-sm space-y-4">
-            <div className="flex flex-wrap justify-between items-center gap-4">
-              <h2 className="font-bold text-lg flex items-center gap-2 text-slate-800">
-                <Users size={20} className="text-blue-600" /> Barangay Residents Census Directory
-              </h2>
+        {/* TAB 3: BLOTTER & DISPUTES */}
+        {activeTab === 'blotter' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-xl border shadow-sm h-fit">
+              <h2 className="font-bold text-base text-slate-900">Record Katarungang Pambarangay Blotter Case</h2>
+              <p className="text-xs text-slate-500 mb-4">
+                Linking a registered resident as respondent automatically blocks their clearance issuance until settled.
+              </p>
 
+              <form onSubmit={handleAddBlotter} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Complainant Name *</label>
+                  <input
+                    placeholder="Full name of complainant"
+                    value={complainantName}
+                    onChange={(e) => setComplainantName(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Registered Respondent (Optional)
+                  </label>
+                  <select
+                    value={respondentId}
+                    onChange={(e) => setRespondentId(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                  >
+                    <option value="">-- Non-Resident / Unlisted --</option>
+                    {residents.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.last_name}, {r.first_name} ({r.households?.purok || 'No Purok'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    {respondentId ? 'Respondent Override (Optional)' : 'External Respondent Name *'}
+                  </label>
+                  <input
+                    placeholder="Enter name if not in dropdown"
+                    value={respondentExternal}
+                    onChange={(e) => setRespondentExternal(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                    required={!respondentId}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Incident Type *</label>
+                  <select
+                    value={incidentType}
+                    onChange={(e) => setIncidentType(e.target.value)}
+                    className="w-full border p-2 rounded text-sm"
+                  >
+                    <option value="Physical Injury / Altercation">Physical Injury / Altercation</option>
+                    <option value="Land / Boundary Dispute">Land / Boundary Dispute</option>
+                    <option value="Unpaid Debt / Estafa">Unpaid Debt / Estafa</option>
+                    <option value="Noise / Public Disturbance">Noise / Public Disturbance</option>
+                    <option value="Theft / Property Damage">Theft / Property Damage</option>
+                    <option value="Oral Defamation / Harassment">Oral Defamation / Harassment</option>
+                    <option value="Other Barangay Dispute">Other Barangay Dispute</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Incident Date *</label>
+                    <input
+                      type="date"
+                      value={incidentDate}
+                      onChange={(e) => setIncidentDate(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Incident Location *</label>
+                    <input
+                      placeholder="e.g., Purok 2 Basketball Court"
+                      value={incidentLocation}
+                      onChange={(e) => setIncidentLocation(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-medium text-slate-700">Incident Narrative *</label>
+                    <button
+                      type="button"
+                      onClick={handleDraftBlotterNarrative}
+                      disabled={draftingBlotter}
+                      className="text-xs text-indigo-600 font-medium flex items-center gap-1 hover:underline"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      {draftingBlotter ? 'Formatting...' : 'Format Formal Narrative with AI'}
+                    </button>
+                  </div>
+                  <textarea
+                    rows={4}
+                    placeholder="Enter rough details of what happened, then click 'Format Formal Narrative with AI'..."
+                    value={narrative}
+                    onChange={(e) => setNarrative(e.target.value)}
+                    className="w-full border p-2.5 rounded text-sm"
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-rose-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-rose-700"
+                >
+                  Log Blotter Case
+                </button>
+              </form>
+            </div>
+
+            {/* Blotter Cases Table */}
+            <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm overflow-x-auto">
+              <h2 className="font-bold text-base text-slate-900 mb-4">Barangay Blotter Logbook</h2>
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
+                    <th className="p-3">Blotter No</th>
+                    <th className="p-3">Complainant</th>
+                    <th className="p-3">Respondent</th>
+                    <th className="p-3">Incident</th>
+                    <th className="p-3">Status</th>
+                    <th className="p-3">Update Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {blotters.map((b) => (
+                    <tr key={b.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-mono font-semibold text-xs">{b.blotter_number}</td>
+                      <td className="p-3">{b.complainant_name}</td>
+                      <td className="p-3">
+                        <div className="font-medium">{b.respondent_name}</div>
+                        {b.respondent_resident_id && (
+                          <span className="text-[11px] text-rose-600 font-medium">Registered Resident</span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <div className="font-medium text-xs">{b.incident_type}</div>
+                        <div className="text-xs text-slate-500">
+                          {b.incident_date} • {b.incident_location}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            b.status === 'Settled' || b.status === 'Dismissed'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {b.status}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <select
+                          value={b.status}
+                          onChange={(e) => handleUpdateBlotterStatus(b.id, e.target.value)}
+                          className="border rounded px-2 py-1 text-xs bg-white"
+                        >
+                          <option value="Pending">Pending</option>
+                          <option value="Mediation">Mediation</option>
+                          <option value="Settled">Settled</option>
+                          <option value="Dismissed">Dismissed</option>
+                          <option value="Escalated to CFA">Escalated to CFA</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                  {blotters.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-slate-400">
+                        No blotter cases recorded.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: RESIDENTS DIRECTORY WITH LIVE SEARCH & FILTER */}
+        {activeTab === 'directory' && (
+          <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
+            <div className="flex flex-wrap justify-between items-center gap-4">
+              <h2 className="font-bold text-base text-slate-900">Barangay Residents Census Directory</h2>
               <div className="flex flex-wrap gap-2">
                 <div className="relative">
-                  <Search size={16} className="absolute left-3 top-2.5 text-slate-400" />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -1164,93 +1135,87 @@ export default function SecretaryDashboard() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="w-full text-left border-collapse text-sm">
                 <thead>
-                  <tr className="border-b text-slate-500">
-                    <th className="py-2">Photo</th>
-                    <th>Full Name</th>
-                    <th>Civil Status / Gender</th>
-                    <th>Purok & Income</th>
-                    <th>Status & Sector Tags</th>
-                    <th>Action</th>
+                  <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
+                    <th className="p-3">Photo</th>
+                    <th className="p-3">Full Name</th>
+                    <th className="p-3">Civil Status / Gender</th>
+                    <th className="p-3">Purok & Income</th>
+                    <th className="p-3">Sector Tags</th>
+                    <th className="p-3">Action</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {filteredResidents.map((res) => {
-                    const hasActiveCase = getActiveBlottersForResident(res.id).length > 0;
-                    return (
-                      <tr key={res.id} className="border-b hover:bg-slate-50">
-                        <td className="py-2.5">
-                          {res.photo_url ? (
-                            <img
-                              src={res.photo_url}
-                              alt={res.first_name}
-                              className="w-10 h-10 rounded-full object-cover border"
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
-                              {res.first_name?.[0]}
-                              {res.last_name?.[0]}
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          <p className="font-medium text-slate-800">
-                            {res.last_name}, {res.first_name} {res.middle_name || ''} {res.suffix || ''}
-                          </p>
-                          <p className="text-xs text-slate-500">{res.occupation || 'No occupation listed'}</p>
-                        </td>
-                        <td className="text-xs">
-                          {res.civil_status} • {res.gender}
-                        </td>
-                        <td className="text-xs">
-                          <p className="font-medium">{res.households?.purok || 'N/A'}</p>
-                          <p className="text-slate-500">₱{res.households?.monthly_income || 0}/mo</p>
-                        </td>
-                        <td className="space-x-1 space-y-1">
-                          {hasActiveCase && (
-                            <span className="bg-rose-100 text-rose-800 text-[11px] font-bold px-2 py-0.5 rounded inline-flex items-center gap-1">
-                              <ShieldAlert size={11} /> Active Blotter
-                            </span>
-                          )}
+                <tbody className="divide-y">
+                  {filteredResidents.map((res) => (
+                    <tr key={res.id} className="hover:bg-slate-50">
+                      <td className="p-3">
+                        {res.photo_url ? (
+                          <img
+                            src={res.photo_url}
+                            alt={res.first_name}
+                            className="w-10 h-10 rounded-full object-cover border"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
+                            {res.first_name?.[0]}
+                            {res.last_name?.[0]}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <div className="font-semibold text-slate-900">
+                          {res.last_name}, {res.first_name} {res.middle_name || ''} {res.suffix || ''}
+                        </div>
+                        <div className="text-xs text-slate-500">{res.occupation || 'No occupation listed'}</div>
+                      </td>
+                      <td className="p-3">
+                        {res.civil_status} • {res.gender}
+                      </td>
+                      <td className="p-3">
+                        <div className="font-medium">{res.households?.purok || 'Unassigned'}</div>
+                        <div className="text-xs text-slate-500">
+                          ₱{Number(res.households?.monthly_income || 0).toLocaleString()}/mo
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap gap-1">
                           {res.is_voter && (
-                            <span className="bg-emerald-100 text-emerald-800 text-[11px] px-2 py-0.5 rounded">
+                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[11px] font-medium">
                               Voter
                             </span>
                           )}
                           {res.is_senior && (
-                            <span className="bg-blue-100 text-blue-800 text-[11px] px-2 py-0.5 rounded">
+                            <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-[11px] font-medium">
                               Senior
                             </span>
                           )}
                           {res.is_pwd && (
-                            <span className="bg-purple-100 text-purple-800 text-[11px] px-2 py-0.5 rounded">
+                            <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-[11px] font-medium">
                               PWD
                             </span>
                           )}
                           {res.is_4ps && (
-                            <span className="bg-amber-100 text-amber-800 text-[11px] px-2 py-0.5 rounded">
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[11px] font-medium">
                               4Ps
                             </span>
                           )}
-                        </td>
-                        <td>
-                          <button
-                            onClick={() =>
-                              handleDeleteResident(res.id, `${res.first_name} ${res.last_name}`)
-                            }
-                            className="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-red-50"
-                            title="Delete Resident Record"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <button
+                          onClick={() => handleDeleteResident(res.id, `${res.first_name} ${res.last_name}`)}
+                          className="text-red-600 hover:bg-red-50 p-1.5 rounded"
+                          title="Delete Resident"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                   {filteredResidents.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-6 text-center text-slate-400">
+                      <td colSpan={6} className="p-6 text-center text-slate-400">
                         No residents match your current search or Purok filter.
                       </td>
                     </tr>
