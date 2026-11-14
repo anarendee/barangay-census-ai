@@ -17,6 +17,15 @@ const ROLE_HOME: Record<BarangayRole, string> = {
   admin: '/dashboard/admin',
 };
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Auth check timed out')), ms)
+    ),
+  ]);
+}
+
 export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
   const [status, setStatus] = useState<'checking' | 'authorized' | 'unauthorized'>('checking');
   const [actualRole, setActualRole] = useState<BarangayRole | null>(null);
@@ -29,20 +38,25 @@ export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
     const verifyAccess = async () => {
       try {
         const supabase = createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+        const { data: sessionData } = await withTimeout(
+          supabase.auth.getSession(),
+          3000
+        );
 
+        const user = sessionData?.session?.user;
         if (!user) {
           window.location.replace('/');
           return;
         }
 
-        const { data: profile, error } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .maybeSingle();
+        const { data: profile, error } = await withTimeout(
+          supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle(),
+          3000
+        );
 
         if (error || !profile?.role) {
           setActualRole('secretary');

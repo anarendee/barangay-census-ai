@@ -10,6 +10,15 @@ const ROLE_ROUTES: Record<string, string> = {
   admin: '/dashboard/admin',
 };
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Session check timed out')), ms)
+    ),
+  ]);
+}
+
 export default function DashboardRedirectPage() {
   const hasRun = useRef(false);
 
@@ -20,25 +29,32 @@ export default function DashboardRedirectPage() {
     const routeUser = async () => {
       try {
         const supabase = createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
 
+        // Use getSession() first (instant local read, avoids navigator.locks hang)
+        const { data: sessionData } = await withTimeout(
+          supabase.auth.getSession(),
+          3000
+        );
+
+        const user = sessionData?.session?.user;
         if (!user) {
           window.location.replace('/');
           return;
         }
 
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .maybeSingle();
+        const { data: profile } = await withTimeout(
+          supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle(),
+          3000
+        );
 
         const role = String(profile?.role || 'secretary').toLowerCase();
-        const target = ROLE_ROUTES[role] || '/dashboard/secretary';
-        window.location.replace(target);
-      } catch {
+        window.location.replace(ROLE_ROUTES[role] || '/dashboard/secretary');
+      } catch (err) {
+        console.error('Redirect error:', err);
         window.location.replace('/');
       }
     };
