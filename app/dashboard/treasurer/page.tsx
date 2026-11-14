@@ -1,7 +1,9 @@
 ﻿'use client';
 
 import { useState, useEffect } from 'react';
+import RoleGuard from '@/components/RoleGuard';
 import { createClient } from '@/lib/supabase';
+import RoleGuard from '@/components/RoleGuard';
 import {
   Receipt,
   Clock,
@@ -10,6 +12,7 @@ import {
   FileCheck2,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import RoleGuard from '@/components/RoleGuard';
 
 export default function TreasurerDashboard() {
   const supabase = createClient();
@@ -369,6 +372,7 @@ export default function TreasurerDashboard() {
               {filteredPayments.map((pay) => {
                 const fallbackResident = `${pay.certificates?.residents?.first_name || ''} ${pay.certificates?.residents?.last_name || ''}`.trim();
                 return (
+    <RoleGuard allowedRole="treasurer">
                   <tr key={pay.id} className="hover:bg-slate-50">
                     <td className="p-3 font-mono font-semibold text-emerald-700">{pay.or_number}</td>
                     <td className="p-3 font-mono text-xs">
@@ -398,5 +402,7 @@ export default function TreasurerDashboard() {
         </div>
       </div>
     </div>
+  
+    </RoleGuard>
   );
 }

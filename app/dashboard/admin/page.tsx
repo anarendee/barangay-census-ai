@@ -1,12 +1,15 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
+import RoleGuard from '@/components/RoleGuard';
 import { createClient } from '@/lib/supabase';
+import RoleGuard from '@/components/RoleGuard';
 import {
   Users, Home, DollarSign, Scale, Sparkles, LogOut,
   FileText, ShieldCheck, BarChart3, Send
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import RoleGuard from '@/components/RoleGuard';
 
 const PUROKS = ['Purok 1', 'Purok 2', 'Purok 3', 'Purok 4', 'Purok 5', 'Purok 6'];
 
@@ -148,6 +151,7 @@ export default function AdminDashboard() {
   };
 
   return (
+    <RoleGuard allowedRole="admin">
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Top Executive Header */}
@@ -158,7 +162,7 @@ export default function AdminDashboard() {
             </div>
             <h1 className="text-2xl font-bold">Executive Governance & Census Dashboard</h1>
             <p className="text-xs text-slate-300 mt-0.5">
-              Barangay Enrique JC Montilla • City of Tacurong, Province of Sultan Kudarat
+              Barangay Enrique JC Montilla â€¢ City of Tacurong, Province of Sultan Kudarat
             </p>
           </div>
           <button
@@ -185,7 +189,7 @@ export default function AdminDashboard() {
               </div>
             </div>
             <p className="text-xs text-slate-500 mt-3">
-              {maleCount} Male • {femaleCount} Female
+              {maleCount} Male â€¢ {femaleCount} Female
             </p>
           </div>
 
@@ -207,7 +211,7 @@ export default function AdminDashboard() {
               <div>
                 <p className="text-xs font-semibold uppercase text-slate-500">Treasury Collections</p>
                 <p className="text-3xl font-bold text-emerald-600 mt-1">
-                  ₱{loading ? '...' : totalRevenue.toLocaleString()}
+                  â‚±{loading ? '...' : totalRevenue.toLocaleString()}
                 </p>
               </div>
               <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-lg">
@@ -366,7 +370,7 @@ export default function AdminDashboard() {
                     <td className="p-3">{row.pwds}</td>
                     <td className="p-3">{row.fourPs}</td>
                     <td className="p-3 font-mono text-xs text-slate-700">
-                      ₱{Math.round(row.avgIncome).toLocaleString()}
+                      â‚±{Math.round(row.avgIncome).toLocaleString()}
                     </td>
                   </tr>
                 ))}
@@ -376,5 +380,7 @@ export default function AdminDashboard() {
         </div>
       </div>
     </div>
+  
+    </RoleGuard>
   );
 }

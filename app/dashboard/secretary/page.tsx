@@ -1,13 +1,17 @@
 ﻿'use client';
 
 import { useState, useEffect } from 'react';
+import RoleGuard from '@/components/RoleGuard';
 import { createClient } from '@/lib/supabase';
+import RoleGuard from '@/components/RoleGuard';
 import {
   Printer, UserPlus, FileText, LogOut, Sparkles, Users,
   Search, Trash2, Building2, CheckCircle2, Clock, ShieldAlert, Scale
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import RoleGuard from '@/components/RoleGuard';
 import { QRCodeSVG } from 'qrcode.react';
+import RoleGuard from '@/components/RoleGuard';
 
 const CERTIFICATE_OPTIONS = [
   { label: 'Barangay Clearance', defaultFee: '50', requiresClearBlotter: true },
@@ -478,6 +482,7 @@ export default function SecretaryDashboard() {
   }
 
   return (
+    <RoleGuard allowedRole="secretary">
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
@@ -1239,5 +1244,7 @@ export default function SecretaryDashboard() {
         )}
       </div>
     </div>
+  
+    </RoleGuard>
   );
 }

@@ -1,145 +1,157 @@
 ﻿'use client';
-import { useState } from 'react';
+
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
-import { ShieldCheck, Lock, Mail, Building2 } from 'lucide-react';
+import { ShieldCheck, Lock, Mail, QrCode, Loader2 } from 'lucide-react';
+
+const ROLE_ROUTES: Record<string, string> = {
+  secretary: '/dashboard/secretary',
+  treasurer: '/dashboard/treasurer',
+  admin: '/dashboard/admin',
+};
 
 export default function LoginPage() {
+  const supabase = createClient();
+  const router = useRouter();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const router = useRouter();
-  const supabase = createClient();
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    const checkExistingSession = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        await redirectByRole(user.id);
+      } else {
+        setCheckingSession(false);
+      }
+    };
+    checkExistingSession();
+  }, []);
+
+  const redirectByRole = async (userId: string) => {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const role = String(profile?.role || 'secretary').toLowerCase();
+    router.replace(ROLE_ROUTES[role] || '/dashboard/secretary');
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
+    setErrorMsg('');
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
       password,
     });
 
-    if (authError || !authData.user) {
-      setError('Invalid email or password. Please check your credentials.');
+    if (error || !data.user) {
+      setErrorMsg(error?.message || 'Invalid email or password.');
       setLoading(false);
       return;
     }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', authData.user.id)
-      .single();
-
-    if (profile?.role === 'admin') router.push('/dashboard/admin');
-    else if (profile?.role === 'secretary') router.push('/dashboard/secretary');
-    else if (profile?.role === 'treasurer') router.push('/dashboard/treasurer');
-    else {
-      setError('No role assigned to this account. Contact the System Administrator.');
-      setLoading(false);
-    }
+    await redirectByRole(data.user.id);
   };
 
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-300 gap-2 text-sm">
+        <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+        Checking active session...
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 p-4">
-      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md space-y-6 border border-slate-200">
-        <div className="text-center space-y-2">
-          <div className="inline-flex p-3.5 bg-blue-50 text-blue-700 rounded-2xl border border-blue-100">
-            <Building2 size={36} />
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="bg-blue-950 text-white p-6 text-center space-y-1">
+          <div className="w-12 h-12 rounded-full bg-amber-400/20 text-amber-300 flex items-center justify-center mx-auto mb-2">
+            <ShieldCheck className="w-6 h-6" />
           </div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-blue-600">
-            Republic of the Philippines • City of Tacurong
+          <p className="text-[11px] uppercase tracking-widest text-amber-400 font-semibold">
+            City of Tacurong • Sultan Kudarat
           </p>
-          <h1 className="text-2xl font-extrabold text-slate-900">
-            Barangay Enrique JC Montilla
+          <h1 className="text-xl font-extrabold tracking-wide">
+            BARANGAY ENRIQUE JC MONTILLA
           </h1>
-          <p className="text-sm text-slate-500">
-            AI-Assisted Census & Local Governance Information System
+          <p className="text-xs text-blue-200">
+            Integrated Census, Treasury &amp; Governance System
           </p>
         </div>
 
-        {error && (
-          <div role="alert" className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg text-center">
-            {error}
-          </div>
-        )}
+        <form onSubmit={handleLogin} className="p-6 space-y-4">
+          {errorMsg && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
+              {errorMsg}
+            </div>
+          )}
 
-        <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label htmlFor="email" className="block text-sm font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
               Official Email Address
             </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-3 text-slate-400" size={18} />
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               <input
-                id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-600 outline-none"
-                placeholder="official@barangay.gov.ph"
+                placeholder="official@barangaymontilla.gov.ph"
+                className="w-full border rounded-lg pl-9 pr-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-600"
                 required
               />
             </div>
           </div>
+
           <div>
-            <label htmlFor="password" className="block text-sm font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
               Password
             </label>
             <div className="relative">
-              <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               <input
-                id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-600 outline-none"
                 placeholder="••••••••"
+                className="w-full border rounded-lg pl-9 pr-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-600"
                 required
               />
             </div>
           </div>
+
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-700 text-white py-3 rounded-lg font-semibold hover:bg-blue-800 transition shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full bg-blue-700 hover:bg-blue-800 text-white py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-50"
           >
-            <ShieldCheck size={18} />
-            {loading ? 'Verifying Credentials...' : 'Sign In to Portal'}
+            {loading ? 'Signing In...' : 'Sign In to Portal'}
           </button>
-        </form>
 
-        <div className="pt-4 border-t border-slate-100">
-          <p className="text-[11px] text-center text-slate-400 uppercase font-semibold mb-2">
-            Quick Demo Account Fill (For Defense Presentation)
-          </p>
-          <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="pt-3 border-t text-center">
             <button
               type="button"
-              onClick={() => { setEmail('admin@barangay.gov.ph'); setPassword('Admin123!'); }}
-              className="py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium"
+              onClick={() => router.push('/verify/check')}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-700"
             >
-              Admin
-            </button>
-            <button
-              type="button"
-              onClick={() => { setEmail('secretary@barangay.gov.ph'); setPassword('Sec123!'); }}
-              className="py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium"
-            >
-              Secretary
-            </button>
-            <button
-              type="button"
-              onClick={() => { setEmail('treasurer@barangay.gov.ph'); setPassword('Treas123!'); }}
-              className="py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium"
-            >
-              Treasurer
+              <QrCode className="w-4 h-4" /> Verify a Printed Barangay Certificate
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );
