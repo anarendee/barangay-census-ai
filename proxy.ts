@@ -33,24 +33,29 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  // Enforce strict role-based routing
+  // Enforce strict role-based routing on the server
   if (user && pathname.startsWith('/dashboard')) {
     const { data: profile } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
-    const role = profile?.role;
+    const role = String(profile?.role || 'secretary').toLowerCase();
+
+    // If visiting /dashboard directly, send straight to their role's portal
+    if (pathname === '/dashboard' || pathname === '/dashboard/') {
+      return NextResponse.redirect(new URL(`/dashboard/${role}`, request.url));
+    }
 
     if (pathname.startsWith('/dashboard/admin') && role !== 'admin') {
-      return NextResponse.redirect(new URL(`/dashboard/${role || ''}`, request.url));
+      return NextResponse.redirect(new URL(`/dashboard/${role}`, request.url));
     }
     if (pathname.startsWith('/dashboard/secretary') && role !== 'secretary' && role !== 'admin') {
-      return NextResponse.redirect(new URL(`/dashboard/${role || ''}`, request.url));
+      return NextResponse.redirect(new URL(`/dashboard/${role}`, request.url));
     }
     if (pathname.startsWith('/dashboard/treasurer') && role !== 'treasurer' && role !== 'admin') {
-      return NextResponse.redirect(new URL(`/dashboard/${role || ''}`, request.url));
+      return NextResponse.redirect(new URL(`/dashboard/${role}`, request.url));
     }
   }
 
