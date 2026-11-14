@@ -10,9 +10,9 @@ const ROLE_ROUTES: Record<string, string> = {
   admin: '/dashboard/admin',
 };
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+function withTimeout<T>(promise: PromiseLike<T>, ms: number): Promise<T> {
   return Promise.race([
-    promise,
+    Promise.resolve(promise),
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Session check timed out')), ms)
     ),
@@ -30,7 +30,6 @@ export default function DashboardRedirectPage() {
       try {
         const supabase = createClient();
 
-        // Use getSession() first (instant local read, avoids navigator.locks hang)
         const { data: sessionData } = await withTimeout(
           supabase.auth.getSession(),
           3000
