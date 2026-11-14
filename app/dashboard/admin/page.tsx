@@ -1,15 +1,13 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect } from 'react';
 import RoleGuard from '@/components/RoleGuard';
 import { createClient } from '@/lib/supabase';
-import RoleGuard from '@/components/RoleGuard';
 import {
   Users, Home, DollarSign, Scale, Sparkles, LogOut,
   FileText, ShieldCheck, BarChart3, Send
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import RoleGuard from '@/components/RoleGuard';
 
 const PUROKS = ['Purok 1', 'Purok 2', 'Purok 3', 'Purok 4', 'Purok 5', 'Purok 6'];
 
