@@ -1,28 +1,72 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import RoleGuard from '@/components/RoleGuard';
 import { createClient } from '@/lib/supabase';
 import {
-  Users, Home, DollarSign, Scale, Sparkles, LogOut,
-  FileText, ShieldCheck, BarChart3, Send
+  Users,
+  Home,
+  DollarSign,
+  Scale,
+  Sparkles,
+  LogOut,
+  FileText,
+  ShieldCheck,
+  BarChart3,
+  Send,
+  AlertCircle,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 const PUROKS = ['Purok 1', 'Purok 2', 'Purok 3', 'Purok 4', 'Purok 5', 'Purok 6'];
 
+interface HouseholdInfo {
+  purok?: string;
+  monthly_income?: number;
+}
+
+interface Resident {
+  id: string;
+  is_senior?: boolean;
+  is_pwd?: boolean;
+  is_4ps?: boolean;
+  households?: HouseholdInfo | HouseholdInfo[] | null;
+}
+
+interface Household {
+  id: string;
+  purok?: string;
+  monthly_income?: number;
+}
+
+interface Certificate {
+  id: string;
+  status?: string;
+}
+
+interface Payment {
+  id: string;
+  amount_paid?: number | string;
+}
+
+interface Blotter {
+  id: string;
+  status?: string;
+}
+
 export default function AdminDashboard() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
-  const [residents, setResidents] = useState<any[]>([]);
-  const [households, setHouseholds] = useState<any[]>([]);
-  const [certificates, setCertificates] = useState<any[]>([]);
-  const [payments, setPayments] = useState<any[]>([]);
-  const [blotters, setBlotters] = useState<any[]>([]);
+  const [residents, setResidents] = useState<Resident[]>([]);
+  const [households, setHouseholds] = useState<Household[]>([]);
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [blotters, setBlotters] = useState<Blotter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // AI Census Analyst State
+  // Executive AI Analyst State
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiResponse, setAiResponse] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -33,352 +77,411 @@ export default function AdminDashboard() {
 
   const fetchExecutiveData = async () => {
     setLoading(true);
-    const [
-      { data: resData },
-      { data: hhData },
-      { data: certData },
-      { data: payData },
-      { data: blotterData },
-    ] = await Promise.all([
-      supabase.from('residents').select('*, households(purok, monthly_income)'),
-      supabase.from('households').select('*'),
-      supabase.from('certificates').select('*'),
-      supabase.from('payments').select('*'),
-      supabase.from('blotters').select('*'),
-    ]);
+    setErrorMsg(null);
 
-    if (resData) setResidents(resData);
-    if (hhData) setHouseholds(hhData);
-    if (certData) setCertificates(certData);
-    if (payData) setPayments(payData);
-    if (blotterData) setBlotters(blotterData);
-    setLoading(false);
+    try {
+      const [
+        resResult,
+        hhResult,
+        certResult,
+        payResult,
+        blotterResult,
+      ] = await Promise.all([
+        supabase.from('residents').select('*, households(purok, monthly_income)'),
+        supabase.from('households').select('*'),
+        supabase.from('certificates').select('*'),
+        supabase.from('payments').select('*'),
+        supabase.from('blotters').select('*'),
+      ]);
+
+      const firstError =
+        resResult.error ||
+        hhResult.error ||
+        certResult.error ||
+        payResult.error ||
+        blotterResult.error;
+
+      if (firstError) {
+        setErrorMsg(`Database error: ${firstError.message}`);
+        return;
+      }
+
+      setResidents(resResult.data || []);
+      setHouseholds(hhResult.data || []);
+      setCertificates(certResult.data || []);
+      setPayments(payResult.data || []);
+      setBlotters(blotterResult.data || []);
+    } catch {
+      setErrorMsg('Failed to connect to the barangay database.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // --- Executive Metrics Calculations ---
+  // --- ANALYTICS CALCULATIONS ---
   const totalPopulation = residents.length;
   const totalHouseholds = households.length;
-  const registeredVoters = residents.filter((r) => r.is_voter).length;
-  const seniorCitizens = residents.filter((r) => r.is_senior).length;
+  const seniorCount = residents.filter((r) => r.is_senior).length;
   const pwdCount = residents.filter((r) => r.is_pwd).length;
   const fourPsCount = residents.filter((r) => r.is_4ps).length;
 
-  const maleCount = residents.filter((r) => r.gender === 'Male').length;
-  const femaleCount = residents.filter((r) => r.gender === 'Female').length;
+  const totalRevenue = payments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+  const pendingCerts = certificates.filter((c) => c.status === 'Pending').length;
+  const releasedCerts = certificates.filter((c) => c.status === 'Released').length;
 
-  const totalRevenue = payments.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
-  const totalCertsIssued = certificates.length;
-  const waivedCertsCount = certificates.filter((c) => c.status === 'waived' || Number(c.fee) === 0).length;
-  const activeBlotters = blotters.filter((b) => b.status === 'Pending' || b.status === 'Mediation').length;
-  const settledBlotters = blotters.filter((b) => b.status === 'Settled' || b.status === 'Dismissed').length;
+  const activeBlotters = blotters.filter(
+    (b) => b.status === 'Pending' || b.status === 'Mediation'
+  ).length;
+  const settledBlotters = blotters.filter((b) => b.status === 'Settled').length;
 
-  // --- Purok-by-Purok Breakdown ---
-  const purokBreakdown = PUROKS.map((purokName) => {
-    const purokResidents = residents.filter((r) => r.households?.purok === purokName);
-    const purokHouseholds = households.filter((h) => h.purok === purokName);
-    const avgIncome =
-      purokHouseholds.length > 0
-        ? purokHouseholds.reduce((sum, h) => sum + (Number(h.monthly_income) || 0), 0) / purokHouseholds.length
-        : 0;
+  // Group stats by Purok for the Executive Table
+  const purokStats = PUROKS.map((purokName) => {
+    const pHouseholds = households.filter((h) => h.purok === purokName);
+    const pResidents = residents.filter((r) => {
+      const hh = Array.isArray(r.households) ? r.households[0] : r.households;
+      return hh?.purok === purokName;
+    });
+    const pSeniors = pResidents.filter((r) => r.is_senior).length;
+    const p4Ps = pResidents.filter((r) => r.is_4ps).length;
 
     return {
-      purok: purokName,
-      population: purokResidents.length,
-      households: purokHouseholds.length,
-      voters: purokResidents.filter((r) => r.is_voter).length,
-      seniors: purokResidents.filter((r) => r.is_senior).length,
-      pwds: purokResidents.filter((r) => r.is_pwd).length,
-      fourPs: purokResidents.filter((r) => r.is_4ps).length,
-      avgIncome,
+      name: purokName,
+      households: pHouseholds.length,
+      population: pResidents.length,
+      seniors: pSeniors,
+      fourPs: p4Ps,
     };
   });
 
-  // --- AI Census Analyst Handler ---
-  const handleAskAnalyst = async (e?: React.FormEvent, presetQuestion?: string) => {
-    if (e) e.preventDefault();
-    const query = presetQuestion || aiPrompt;
+  // --- EXECUTIVE AI ANALYST ---
+  const askExecutiveAI = async (customQuery?: string) => {
+    const query = customQuery || aiPrompt;
     if (!query.trim()) return;
 
-    if (presetQuestion) setAiPrompt(presetQuestion);
     setAiLoading(true);
     setAiResponse('');
 
-    const censusSummary = {
-      barangay: 'Barangay Enrique JC Montilla, City of Tacurong, Sultan Kudarat',
-      totalPopulation,
-      totalHouseholds,
-      genderSplit: { male: maleCount, female: femaleCount },
-      sectors: {
-        registeredVoters,
-        seniorCitizens,
-        pwd: pwdCount,
-        fourPsBeneficiaries: fourPsCount,
-      },
-      purokDistribution: purokBreakdown,
-      treasuryAndServices: {
-        totalRevenuePHP: totalRevenue,
-        totalCertificatesProcessed: totalCertsIssued,
-        freeOrWaivedCertificates: waivedCertsCount,
-      },
-      peaceAndOrder: {
-        totalBlotterCases: blotters.length,
-        activeOrInMediation: activeBlotters,
-        settledOrDismissed: settledBlotters,
-      },
-    };
+    const censusSummary = `
+      Barangay Enrique JC Montilla Executive Data:
+      - Total Population: ${totalPopulation} across ${totalHouseholds} Households.
+      - Vulnerable Sectors: ${seniorCount} Senior Citizens, ${pwdCount} PWDs, ${fourPsCount} 4Ps Beneficiaries.
+      - Purok Breakdown: ${purokStats
+        .map(
+          (p) =>
+            `${p.name}: ${p.population} residents (${p.households} HH, ${p.seniors} Seniors, ${p.fourPs} 4Ps)`
+        )
+        .join(' | ')}.
+      - Treasury & Revenue: ₱${totalRevenue.toLocaleString()} total collected from ${payments.length} official receipts.
+      - Documents: ${releasedCerts} certificates released, ${pendingCerts} pending.
+      - Peace & Order (Blotters): ${activeBlotters} active/mediation cases, ${settledBlotters} settled cases.
+    `;
 
     try {
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `You are the Executive AI Census & Policy Analyst for the Punong Barangay of Barangay Enrique JC Montilla, City of Tacurong. Analyze the live barangay database summary below and provide clear, actionable governance insights, budget/program recommendations, or demographic answers.\n\nLIVE BARANGAY DATA:\n${JSON.stringify(
-            censusSummary,
-            null,
-            2
-          )}\n\nPUNONG BARANGAY QUESTION:\n${query}`,
+          prompt: `You are the Executive AI Census & Policy Analyst for the Punong Barangay (Captain) of Barangay Enrique JC Montilla, Tacurong City. Answer the Captain's question concisely using the live barangay database metrics below, and provide 1-2 actionable governance recommendations.
+          
+          LIVE BARANGAY DATA:
+          ${censusSummary}
+          
+          CAPTAIN'S QUESTION: ${query}`,
         }),
       });
+
       const data = await res.json();
-      setAiResponse(data.reply || data.error || 'No analysis returned.');
+      setAiResponse(data.text || 'No response generated.');
     } catch {
-      setAiResponse('Unable to reach the AI Census Analyst endpoint.');
+      setAiResponse('Error connecting to Executive AI Analyst.');
     } finally {
       setAiLoading(false);
     }
   };
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/');
+  };
+
   return (
     <RoleGuard allowedRole="admin">
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Top Executive Header */}
-        <div className="bg-slate-900 text-white p-6 rounded-xl shadow-sm flex flex-wrap justify-between items-center gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-wider mb-1">
-              <ShieldCheck className="w-4 h-4" /> Office of the Punong Barangay
+      <div className="min-h-screen bg-slate-100 flex flex-col">
+        {/* Top Navigation */}
+        <header className="bg-slate-900 text-white px-8 py-4 flex justify-between items-center shadow-md">
+          <div className="flex items-center space-x-3">
+            <div className="bg-blue-600 p-2 rounded-lg">
+              <ShieldCheck size={24} className="text-white" />
             </div>
-            <h1 className="text-2xl font-bold">Executive Governance & Census Dashboard</h1>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Barangay Enrique JC Montilla â€¢ City of Tacurong, Province of Sultan Kudarat
-            </p>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight">
+                Punong Barangay Executive Command
+              </h1>
+              <p className="text-xs text-slate-400">
+                Barangay Enrique JC Montilla • City of Tacurong
+              </p>
+            </div>
           </div>
           <button
-            onClick={async () => {
-              await supabase.auth.signOut();
-              router.push('/');
-            }}
-            className="bg-slate-800 hover:bg-slate-700 text-red-300 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition"
+            onClick={handleLogout}
+            className="flex items-center space-x-2 bg-slate-800 hover:bg-red-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
-            <LogOut className="w-4 h-4" /> Logout
+            <LogOut size={16} />
+            <span>Sign Out</span>
           </button>
-        </div>
+        </header>
 
-        {/* Primary KPI Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-xl border shadow-sm">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-xs font-semibold uppercase text-slate-500">Total Population</p>
-                <p className="text-3xl font-bold text-slate-900 mt-1">{loading ? '...' : totalPopulation}</p>
+        <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+          {/* Database Error Banner */}
+          {errorMsg && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-sm font-medium">
+                <AlertCircle size={18} />
+                <span>{errorMsg}</span>
               </div>
-              <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg">
-                <Users className="w-5 h-5" />
-              </div>
+              <button
+                onClick={fetchExecutiveData}
+                className="text-xs font-bold underline hover:text-red-900"
+              >
+                Retry
+              </button>
             </div>
-            <p className="text-xs text-slate-500 mt-3">
-              {maleCount} Male â€¢ {femaleCount} Female
-            </p>
-          </div>
+          )}
 
-          <div className="bg-white p-5 rounded-xl border shadow-sm">
-            <div className="flex justify-between items-start">
+          {/* Top KPI Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase text-slate-500">Registered Households</p>
-                <p className="text-3xl font-bold text-slate-900 mt-1">{loading ? '...' : totalHouseholds}</p>
-              </div>
-              <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-lg">
-                <Home className="w-5 h-5" />
-              </div>
-            </div>
-            <p className="text-xs text-slate-500 mt-3">Across {PUROKS.length} Purok Zones</p>
-          </div>
-
-          <div className="bg-white p-5 rounded-xl border shadow-sm">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-xs font-semibold uppercase text-slate-500">Treasury Collections</p>
-                <p className="text-3xl font-bold text-emerald-600 mt-1">
-                  â‚±{loading ? '...' : totalRevenue.toLocaleString()}
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Total Population
+                </p>
+                <p className="text-3xl font-extrabold text-slate-800 mt-1">
+                  {loading ? '...' : totalPopulation}
+                </p>
+                <p className="text-xs text-blue-600 font-medium mt-1">
+                  Across {totalHouseholds} Households
                 </p>
               </div>
-              <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-lg">
-                <DollarSign className="w-5 h-5" />
+              <div className="bg-blue-50 p-3.5 rounded-xl text-blue-600">
+                <Users size={28} />
               </div>
             </div>
-            <p className="text-xs text-slate-500 mt-3">
-              {totalCertsIssued} Certs ({waivedCertsCount} Fee-Waived)
-            </p>
-          </div>
 
-          <div className="bg-white p-5 rounded-xl border shadow-sm">
-            <div className="flex justify-between items-start">
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase text-slate-500">Active Blotter Cases</p>
-                <p className="text-3xl font-bold text-rose-600 mt-1">{loading ? '...' : activeBlotters}</p>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Treasury Revenue
+                </p>
+                <p className="text-3xl font-extrabold text-emerald-600 mt-1">
+                  ₱{loading ? '...' : totalRevenue.toLocaleString()}
+                </p>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  {payments.length} Official Receipts
+                </p>
               </div>
-              <div className="p-2.5 bg-rose-50 text-rose-600 rounded-lg">
-                <Scale className="w-5 h-5" />
+              <div className="bg-emerald-50 p-3.5 rounded-xl text-emerald-600">
+                <DollarSign size={28} />
               </div>
             </div>
-            <p className="text-xs text-slate-500 mt-3">{settledBlotters} Settled / Dismissed</p>
-          </div>
-        </div>
 
-        {/* Vulnerable & Special Sectors Strip */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-blue-50/70 border border-blue-200 p-4 rounded-xl">
-            <p className="text-xs font-semibold text-blue-800">Registered Voters</p>
-            <p className="text-2xl font-bold text-blue-950 mt-1">{registeredVoters}</p>
-            <p className="text-[11px] text-blue-700 mt-0.5">
-              {totalPopulation > 0 ? Math.round((registeredVoters / totalPopulation) * 100) : 0}% of population
-            </p>
-          </div>
-
-          <div className="bg-amber-50/70 border border-amber-200 p-4 rounded-xl">
-            <p className="text-xs font-semibold text-amber-800">Senior Citizens</p>
-            <p className="text-2xl font-bold text-amber-950 mt-1">{seniorCitizens}</p>
-            <p className="text-[11px] text-amber-700 mt-0.5">OSCA / Social Pension Priority</p>
-          </div>
-
-          <div className="bg-purple-50/70 border border-purple-200 p-4 rounded-xl">
-            <p className="text-xs font-semibold text-purple-800">Persons with Disability (PWD)</p>
-            <p className="text-2xl font-bold text-purple-950 mt-1">{pwdCount}</p>
-            <p className="text-[11px] text-purple-700 mt-0.5">Accessibility & Aid Allocation</p>
-          </div>
-
-          <div className="bg-emerald-50/70 border border-emerald-200 p-4 rounded-xl">
-            <p className="text-xs font-semibold text-emerald-800">4Ps Beneficiaries</p>
-            <p className="text-2xl font-bold text-emerald-950 mt-1">{fourPsCount}</p>
-            <p className="text-[11px] text-emerald-700 mt-0.5">DSWD Pantawid Pamilya</p>
-          </div>
-        </div>
-
-        {/* AI Census Analyst & Purok Breakdown Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* AI Census Analyst Panel */}
-          <div className="lg:col-span-5 bg-white p-6 rounded-xl border shadow-sm flex flex-col justify-between space-y-4">
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-indigo-700 font-bold text-base">
-                <Sparkles className="w-5 h-5" /> AI Census & Governance Analyst
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Clearances & Certs
+                </p>
+                <p className="text-3xl font-extrabold text-slate-800 mt-1">
+                  {loading ? '...' : releasedCerts}
+                </p>
+                <p className="text-xs text-amber-600 font-medium mt-1">
+                  {pendingCerts} Pending Approval
+                </p>
               </div>
-              <p className="text-xs text-slate-500">
-                Ask strategic questions about Purok demographics, social welfare targeting, or barangay revenue.
-              </p>
+              <div className="bg-amber-50 p-3.5 rounded-xl text-amber-600">
+                <FileText size={28} />
+              </div>
+            </div>
 
-              {/* Quick Prompt Chips */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleAskAnalyst(
-                      undefined,
-                      'Which Purok needs the highest priority for social welfare and 4Ps/Senior medical assistance based on income and demographics?'
-                    )
-                  }
-                  className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-800 px-2.5 py-1.5 rounded-lg border border-indigo-200 text-left transition"
-                >
-                  Prioritize Purok social aid
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleAskAnalyst(
-                      undefined,
-                      'Summarize our current barangay demographic profile and peace-and-order status for a Barangay Assembly report.'
-                    )
-                  }
-                  className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-800 px-2.5 py-1.5 rounded-lg border border-indigo-200 text-left transition"
-                >
-                  Draft Barangay Assembly summary
-                </button>
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Active Blotters
+                </p>
+                <p className="text-3xl font-extrabold text-slate-800 mt-1">
+                  {loading ? '...' : activeBlotters}
+                </p>
+                <p className="text-xs text-purple-600 font-medium mt-1">
+                  {settledBlotters} Cases Settled
+                </p>
+              </div>
+              <div className="bg-purple-50 p-3.5 rounded-xl text-purple-600">
+                <Scale size={28} />
+              </div>
+            </div>
+          </div>
+
+          {/* Main Dashboard Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left 2 Columns: Purok Demographics & Vulnerable Sectors */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Vulnerable Sectors Breakdown */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <div className="flex items-center space-x-2 mb-4">
+                  <Home size={20} className="text-blue-600" />
+                  <h2 className="text-base font-bold text-slate-800">
+                    Vulnerable & Priority Sectors
+                  </h2>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <p className="text-2xl font-extrabold text-slate-800">
+                      {loading ? '...' : seniorCount}
+                    </p>
+                    <p className="text-xs font-medium text-slate-500 mt-1">
+                      Senior Citizens
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <p className="text-2xl font-extrabold text-slate-800">
+                      {loading ? '...' : pwdCount}
+                    </p>
+                    <p className="text-xs font-medium text-slate-500 mt-1">
+                      PWD Residents
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <p className="text-2xl font-extrabold text-slate-800">
+                      {loading ? '...' : fourPsCount}
+                    </p>
+                    <p className="text-xs font-medium text-slate-500 mt-1">
+                      4Ps Beneficiaries
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <form onSubmit={(e) => handleAskAnalyst(e)} className="space-y-2 pt-2">
-                <textarea
-                  rows={3}
+              {/* Purok Population Matrix */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-2">
+                    <BarChart3 size={20} className="text-blue-600" />
+                    <h2 className="text-base font-bold text-slate-800">
+                      Census Breakdown by Purok
+                    </h2>
+                  </div>
+                  <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
+                    Live RBIM Sync
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                        <th className="py-3 px-4">Purok Zone</th>
+                        <th className="py-3 px-4">Households</th>
+                        <th className="py-3 px-4">Population</th>
+                        <th className="py-3 px-4">Seniors</th>
+                        <th className="py-3 px-4">4Ps</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-sm">
+                      {purokStats.map((p) => (
+                        <tr key={p.name} className="hover:bg-slate-50 transition-colors">
+                          <td className="py-3 px-4 font-bold text-slate-800">{p.name}</td>
+                          <td className="py-3 px-4 text-slate-600">{p.households}</td>
+                          <td className="py-3 px-4 text-slate-600">{p.population}</td>
+                          <td className="py-3 px-4 text-slate-600">{p.seniors}</td>
+                          <td className="py-3 px-4 text-slate-600">{p.fourPs}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column: Executive AI Policy & Census Analyst */}
+            <div className="bg-slate-900 text-white p-6 rounded-xl shadow-md flex flex-col justify-between space-y-4">
+              <div className="space-y-4">
+                <div>
+                  <span className="inline-flex items-center space-x-1.5 text-xs font-semibold text-blue-400 bg-blue-950/80 border border-blue-800/60 px-2.5 py-1 rounded-full">
+                    <Sparkles size={13} />
+                    <span>Executive Decision Support</span>
+                  </span>
+                  <h2 className="text-lg font-bold mt-3">
+                    AI Census & Policy Analyst
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Ask questions about live demographics, budget allocation, or purok priorities.
+                  </p>
+                </div>
+
+                {/* Quick Prompt Chips */}
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      askExecutiveAI('Which Purok needs the most senior citizen & 4Ps support?')
+                    }
+                    className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-lg border border-slate-700 text-left transition-colors"
+                  >
+                    📊 Purok Aid Priority
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      askExecutiveAI('Summarize our current revenue and peace & order status.')
+                    }
+                    className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-lg border border-slate-700 text-left transition-colors"
+                  >
+                    💰 Financial & Blotter Brief
+                  </button>
+                </div>
+
+                {/* AI Output Box */}
+                <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4 min-h-[180px] text-sm text-slate-200 whitespace-pre-line leading-relaxed">
+                  {aiLoading ? (
+                    <span className="text-slate-400 animate-pulse">
+                      Analyzing live barangay records...
+                    </span>
+                  ) : aiResponse ? (
+                    aiResponse
+                  ) : (
+                    <span className="text-slate-400 text-xs">
+                      Select a quick brief above or ask a custom executive question below...
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Custom Question Input */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  askExecutiveAI();
+                }}
+                className="flex items-center gap-2 pt-2"
+              >
+                <input
+                  type="text"
+                  placeholder="Ask AI about barangay data..."
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="e.g., How should we allocate our Senior Citizen and PWD budget across Puroks 1 to 6?"
-                  className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
                 />
                 <button
                   type="submit"
-                  disabled={aiLoading}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+                  disabled={aiLoading || !aiPrompt.trim()}
+                  className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 p-2 rounded-lg text-white transition-colors"
+                  aria-label="Send prompt"
                 >
-                  <Send className="w-4 h-4" />
-                  {aiLoading ? 'Analyzing Live Census Data...' : 'Run AI Census Analysis'}
+                  <Send size={16} />
                 </button>
               </form>
             </div>
-
-            {aiResponse && (
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-800 whitespace-pre-wrap max-h-80 overflow-y-auto leading-relaxed">
-                {aiResponse}
-              </div>
-            )}
           </div>
-
-          {/* Purok Demographic & Socio-Economic Table */}
-          <div className="lg:col-span-7 bg-white p-6 rounded-xl border shadow-sm overflow-x-auto">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-blue-600" /> Purok Demographic & Socio-Economic Breakdown
-                </h2>
-                <p className="text-xs text-slate-500">Live aggregation across all encoded households and residents</p>
-              </div>
-              <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md font-medium flex items-center gap-1">
-                <FileText className="w-3.5 h-3.5" /> {PUROKS.length} Zones
-              </span>
-            </div>
-
-            <table className="w-full text-left border-collapse text-sm">
-              <thead>
-                <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
-                  <th className="p-3">Purok</th>
-                  <th className="p-3">Pop.</th>
-                  <th className="p-3">Households</th>
-                  <th className="p-3">Voters</th>
-                  <th className="p-3">Seniors</th>
-                  <th className="p-3">PWD</th>
-                  <th className="p-3">4Ps</th>
-                  <th className="p-3">Avg. Income</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {purokBreakdown.map((row) => (
-                  <tr key={row.purok} className="hover:bg-slate-50">
-                    <td className="p-3 font-semibold text-slate-900">{row.purok}</td>
-                    <td className="p-3 font-bold text-blue-700">{row.population}</td>
-                    <td className="p-3">{row.households}</td>
-                    <td className="p-3">{row.voters}</td>
-                    <td className="p-3">{row.seniors}</td>
-                    <td className="p-3">{row.pwds}</td>
-                    <td className="p-3">{row.fourPs}</td>
-                    <td className="p-3 font-mono text-xs text-slate-700">
-                      â‚±{Math.round(row.avgIncome).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        </main>
       </div>
-    </div>
-  
     </RoleGuard>
   );
 }
