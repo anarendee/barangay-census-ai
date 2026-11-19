@@ -1,6 +1,9 @@
 ﻿import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+const VALID_ROLES = ['admin', 'secretary', 'treasurer'] as const;
+type BarangayRole = (typeof VALID_ROLES)[number];
+
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({
     request: { headers: request.headers },
@@ -25,7 +28,9 @@ export async function proxy(request: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const pathname = request.nextUrl.pathname;
 
   // Redirect unauthenticated users back to login page
@@ -35,13 +40,20 @@ export async function proxy(request: NextRequest) {
 
   // Enforce strict role-based routing on the server
   if (user && pathname.startsWith('/dashboard')) {
-    const { data: profile } = await supabase
+    const { data: profile, error } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .maybeSingle();
 
-    const role = String(profile?.role || 'secretary').toLowerCase();
+    const rawRole = String(profile?.role || '').toLowerCase();
+    const isValidRole = VALID_ROLES.includes(rawRole as BarangayRole);
+
+    if (error || !isValidRole) {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
+
+    const role = rawRole as BarangayRole;
 
     // If visiting /dashboard directly, send straight to their role's portal
     if (pathname === '/dashboard' || pathname === '/dashboard/') {
