@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { ShieldAlert, Loader2 } from 'lucide-react';
@@ -19,17 +19,16 @@ const ROLE_HOME: Record<BarangayRole, string> = {
 };
 
 export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
-  const [status, setStatus] = useState<'checking' | 'authorized' | 'unauthorized'>('checking');
+  const [status, setStatus] = useState<'checking' | 'authorized' | 'unauthorized' | 'error'>('checking');
   const [actualRole, setActualRole] = useState<BarangayRole | null>(null);
 
   useEffect(() => {
     let isMounted = true;
 
     const verifyAccess = async () => {
-      // 1. Check active Supabase session
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -39,7 +38,6 @@ export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
         return;
       }
 
-      // 2. Fetch user's assigned role from public.profiles
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('role')
@@ -48,13 +46,14 @@ export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
 
       if (!isMounted) return;
 
-      if (error || !profile?.role) {
-        setActualRole('secretary');
-        if (allowedRole === 'secretary') {
-          setStatus('authorized');
-        } else {
-          setStatus('unauthorized');
-        }
+      if (error) {
+        setStatus('error');
+        return;
+      }
+
+      if (!profile?.role) {
+        setActualRole(null);
+        setStatus('unauthorized');
         return;
       }
 
@@ -84,6 +83,25 @@ export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
     );
   }
 
+  if (status === 'error') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6">
+        <div className="max-w-md w-full bg-white rounded-2xl border border-amber-200 shadow-sm p-6 text-center space-y-4">
+          <h1 className="text-lg font-bold text-slate-900">Connection Error</h1>
+          <p className="text-xs text-slate-600">
+            Unable to verify your official role right now. Please check your connection and try again.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full bg-blue-700 hover:bg-blue-800 text-white py-2.5 rounded-lg text-xs font-semibold"
+          >
+            Retry Verification
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (status === 'unauthorized') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6">
@@ -93,10 +111,16 @@ export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
           </div>
           <h1 className="text-lg font-bold text-slate-900">Access Restricted</h1>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Your account is registered under the{' '}
-            <strong className="uppercase text-slate-900">{actualRole}</strong> role and does not
-            have permission to access the <strong className="uppercase">{allowedRole}</strong>{' '}
-            portal.
+            {actualRole ? (
+              <>
+                Your account is registered under the{' '}
+                <strong className="uppercase text-slate-900">{actualRole}</strong> role and does not
+                have permission to access the <strong className="uppercase">{allowedRole}</strong>{' '}
+                portal.
+              </>
+            ) : (
+              'No official barangay role is assigned to your account. Contact the System Administrator.'
+            )}
           </p>
           <div className="flex gap-2 pt-2">
             {actualRole && ROLE_HOME[actualRole] && (
@@ -112,7 +136,7 @@ export default function RoleGuard({ allowedRole, children }: RoleGuardProps) {
                 await supabase.auth.signOut();
                 router.replace('/');
               }}
-              className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-semibold"
+              className="flex-1 px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-semibold"
             >
               Sign Out
             </button>
