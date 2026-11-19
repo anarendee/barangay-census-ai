@@ -1,6 +1,6 @@
-'use client';
+﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { ShieldCheck, Lock, Mail, QrCode, Loader2 } from 'lucide-react';
@@ -12,7 +12,7 @@ const ROLE_ROUTES: Record<string, string> = {
 };
 
 export default function LoginPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
   const [email, setEmail] = useState('');
@@ -22,29 +22,58 @@ export default function LoginPage() {
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
-    const checkExistingSession = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    let isMounted = true;
 
-      if (user) {
-        await redirectByRole(user.id);
-      } else {
-        setCheckingSession(false);
+    const checkExistingSession = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (user && isMounted) {
+          await redirectByRole(user.id);
+        }
+      } catch {
+        // Ignore session check errors and show login form
+      } finally {
+        if (isMounted) {
+          setCheckingSession(false);
+        }
       }
     };
+
     checkExistingSession();
-  }, []);
+    return () => {
+      isMounted = false;
+    };
+  }, [supabase]);
 
   const redirectByRole = async (userId: string) => {
-    const { data: profile } = await supabase
+    const { data: profile, error } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', userId)
       .maybeSingle();
 
-    const role = String(profile?.role || 'secretary').toLowerCase();
-    router.replace(ROLE_ROUTES[role] || '/dashboard/secretary');
+    if (error || !profile?.role) {
+      setErrorMsg('Account profile or role is missing. Contact the System Administrator.');
+      setCheckingSession(false);
+      setLoading(false);
+      return;
+    }
+
+    const role = String(profile.role).toLowerCase();
+    const targetRoute = ROLE_ROUTES[role];
+
+    if (!targetRoute) {
+      setErrorMsg(`Unrecognized role "${role}" assigned to this account.`);
+      setCheckingSession(false);
+      setLoading(false);
+      return;
+    }
+
+    router.refresh();
+    window.location.href = targetRoute;
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -52,18 +81,23 @@ export default function LoginPage() {
     setLoading(true);
     setErrorMsg('');
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    if (error || !data.user) {
-      setErrorMsg(error?.message || 'Invalid email or password.');
+      if (error || !data.user) {
+        setErrorMsg(error?.message || 'Invalid email or password.');
+        return;
+      }
+
+      await redirectByRole(data.user.id);
+    } catch {
+      setErrorMsg('Unable to connect to authentication server.');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    await redirectByRole(data.user.id);
   };
 
   if (checkingSession) {
