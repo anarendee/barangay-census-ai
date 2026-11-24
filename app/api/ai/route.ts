@@ -1,7 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
-const MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+const MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,7 +33,6 @@ export async function POST(req: NextRequest) {
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    let lastErr: unknown = null;
 
     for (const model of MODELS) {
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -44,21 +43,16 @@ export async function POST(req: NextRequest) {
           });
 
           const reply = response.text?.trim() || '';
-          if (!reply) {
-            return NextResponse.json(
-              { error: 'Gemini returned an empty response.' },
-              { status: 502 }
-            );
+          if (reply) {
+            return NextResponse.json({ reply });
           }
-
-          return NextResponse.json({ reply });
         } catch (err) {
-          lastErr = err;
           if (!isRetryable503(err)) {
-            throw err;
+            const message = err instanceof Error ? err.message : 'Unexpected AI server error.';
+            return NextResponse.json({ error: message }, { status: 500 });
           }
           if (attempt === 0) {
-            await sleep(700);
+            await sleep(800);
           }
         }
       }
