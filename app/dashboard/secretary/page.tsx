@@ -1,11 +1,11 @@
 ﻿'use client';
 
 import { useState, useEffect } from 'react';
-import RoleGuard from '@/components/RoleGuard';
+import RoleGuard from '@/app/RoleGuard';
 import { createClient } from '@/lib/supabase';
 import {
   Printer, UserPlus, FileText, LogOut, Sparkles, Users,
-  Search, Trash2, Building2, CheckCircle2, Clock, ShieldAlert, Scale
+  Search, Trash2, Pencil, X, Building2, CheckCircle2, Clock, ShieldAlert, Scale
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
@@ -22,6 +22,81 @@ const CERTIFICATE_OPTIONS = [
   { label: 'Certificate of No Blotter / No Derogatory Record', defaultFee: '50', requiresClearBlotter: true },
 ];
 
+const LOWERCASE_PARTICLES = new Set(['de', 'del', 'dela', 'de la', 'los', 'las', 'san', 'sto', 'sta', 'ng', 'at', 'y']);
+const ROMAN_SUFFIXES = new Map<string, string>([
+  ['i', 'I'],
+  ['ii', 'II'],
+  ['iii', 'III'],
+  ['iv', 'IV'],
+  ['v', 'V'],
+  ['vi', 'VI'],
+  ['vii', 'VII'],
+  ['viii', 'VIII'],
+  ['ix', 'IX'],
+  ['x', 'X'],
+]);
+const DOTTED_SUFFIXES = new Map<string, string>([
+  ['jr', 'Jr.'],
+  ['jr.', 'Jr.'],
+  ['sr', 'Sr.'],
+  ['sr.', 'Sr.'],
+]);
+
+function capitalizeSegment(seg: string, isFirst: boolean, isSuffix: boolean): string {
+  if (!seg) return '';
+  const cleaned = seg.trim();
+  if (!cleaned) return '';
+
+  const lowerNoDot = cleaned.toLowerCase().replace(/\.+$/, '');
+  const lowerExact = cleaned.toLowerCase();
+
+  if (isSuffix) {
+    if (DOTTED_SUFFIXES.has(lowerExact)) return DOTTED_SUFFIXES.get(lowerExact)!;
+    if (DOTTED_SUFFIXES.has(lowerNoDot)) return DOTTED_SUFFIXES.get(lowerNoDot)!;
+    if (ROMAN_SUFFIXES.has(lowerNoDot)) return ROMAN_SUFFIXES.get(lowerNoDot)!;
+  }
+
+  if (!isFirst && LOWERCASE_PARTICLES.has(lowerNoDot)) {
+    return lowerNoDot;
+  }
+
+  if (lowerNoDot === 'ma' && cleaned.endsWith('.')) {
+    return 'Ma.';
+  }
+
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
+}
+
+function formatNamePart(value: string, options?: { isSuffix?: boolean; trimEnd?: boolean }): string {
+  if (!value) return '';
+  const isSuffix = Boolean(options?.isSuffix);
+  const trimEnd = Boolean(options?.trimEnd);
+
+  const normalizedSpaces = value.replace(/\s+/g, ' ');
+  const working = trimEnd ? normalizedSpaces.trim() : normalizedSpaces.replace(/^\s+/, '');
+  if (!working) return '';
+
+  const hasTrailingSpace = !trimEnd && working.endsWith(' ');
+  const parts = working.split(' ');
+
+  const formattedParts = parts.map((part, idx) => {
+    if (!part) return '';
+    const hyphenSegments = part.split('-').map((hSeg, hIdx) => {
+      const dotSegments = hSeg.split('.').map((dSeg, dIdx, arr) => {
+        if (!dSeg) return '';
+        const cap = capitalizeSegment(dSeg, idx === 0 && hIdx === 0 && dIdx === 0, isSuffix);
+        const needsDot = dIdx < arr.length - 1 || (isSuffix && DOTTED_SUFFIXES.has(dSeg.toLowerCase()));
+        return needsDot ? `${cap}.` : cap;
+      });
+      return dotSegments.join('');
+    });
+    return hyphenSegments.join('-');
+  });
+
+  const joined = formattedParts.join(' ');
+  return hasTrailingSpace ? `${joined} ` : joined;
+}
+
 export default function SecretaryDashboard() {
   const supabase = createClient();
   const router = useRouter();
@@ -36,6 +111,26 @@ export default function SecretaryDashboard() {
   // Directory Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [purokFilter, setPurokFilter] = useState('All');
+
+  // Edit Resident Modal State
+  const [editingResident, setEditingResident] = useState<any | null>(null);
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editMiddleName, setEditMiddleName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editSuffix, setEditSuffix] = useState('');
+  const [editBirthdate, setEditBirthdate] = useState('');
+  const [editGender, setEditGender] = useState('Male');
+  const [editCivilStatus, setEditCivilStatus] = useState('Single');
+  const [editContactNumber, setEditContactNumber] = useState('');
+  const [editPurok, setEditPurok] = useState('Purok 1');
+  const [editAddressLine, setEditAddressLine] = useState('');
+  const [editOccupation, setEditOccupation] = useState('');
+  const [editMonthlyIncome, setEditMonthlyIncome] = useState('');
+  const [editIsVoter, setEditIsVoter] = useState(false);
+  const [editIsSenior, setEditIsSenior] = useState(false);
+  const [editIsPwd, setEditIsPwd] = useState(false);
+  const [editIs4ps, setEditIs4ps] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Full Census Resident & Household Form State
   const [firstName, setFirstName] = useState('');
@@ -227,6 +322,11 @@ export default function SecretaryDashboard() {
 
   const handleAddResident = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanFirst = formatNamePart(firstName, { trimEnd: true });
+    const cleanMiddle = formatNamePart(middleName, { trimEnd: true });
+    const cleanLast = formatNamePart(lastName, { trimEnd: true });
+    const cleanSuffix = formatNamePart(suffix, { isSuffix: true, trimEnd: true });
+
     let photoUrl = '';
     if (photoFile) {
       const fileName = `${Date.now()}-${photoFile.name}`;
@@ -254,10 +354,10 @@ export default function SecretaryDashboard() {
 
     await supabase.from('residents').insert({
       household_id: hhData?.id,
-      first_name: firstName,
-      middle_name: middleName || null,
-      last_name: lastName,
-      suffix: suffix || null,
+      first_name: cleanFirst,
+      middle_name: cleanMiddle || null,
+      last_name: cleanLast,
+      suffix: cleanSuffix || null,
       birthdate,
       gender,
       civil_status: civilStatus,
@@ -286,6 +386,140 @@ export default function SecretaryDashboard() {
     setPhotoFile(null);
     fetchData();
     alert('Resident and Household census record saved!');
+  };
+
+  const openEditModal = (res: any) => {
+    setEditingResident(res);
+    setEditFirstName(formatNamePart(res.first_name || '', { trimEnd: true }));
+    setEditMiddleName(formatNamePart(res.middle_name || '', { trimEnd: true }));
+    setEditLastName(formatNamePart(res.last_name || '', { trimEnd: true }));
+    setEditSuffix(formatNamePart(res.suffix || '', { isSuffix: true, trimEnd: true }));
+    setEditBirthdate(res.birthdate ? String(res.birthdate).slice(0, 10) : '');
+    setEditGender(res.gender || 'Male');
+    setEditCivilStatus(res.civil_status || 'Single');
+    setEditContactNumber(res.contact_number || '');
+    setEditPurok(res.households?.purok || 'Purok 1');
+    setEditAddressLine(res.households?.address_line || '');
+    setEditOccupation(res.occupation || '');
+    setEditMonthlyIncome(
+      res.households?.monthly_income !== undefined && res.households?.monthly_income !== null
+        ? String(res.households.monthly_income)
+        : ''
+    );
+    setEditIsVoter(Boolean(res.is_voter));
+    setEditIsSenior(Boolean(res.is_senior));
+    setEditIsPwd(Boolean(res.is_pwd));
+    setEditIs4ps(Boolean(res.is_4ps));
+  };
+
+  const handleSaveEditResident = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingResident) return;
+    setSavingEdit(true);
+
+    const cleanFirst = formatNamePart(editFirstName, { trimEnd: true });
+    const cleanMiddle = formatNamePart(editMiddleName, { trimEnd: true });
+    const cleanLast = formatNamePart(editLastName, { trimEnd: true });
+    const cleanSuffix = formatNamePart(editSuffix, { isSuffix: true, trimEnd: true });
+    const parsedIncome = parseFloat(editMonthlyIncome) || 0;
+    const cleanAddress = editAddressLine.trim() || `${editPurok}, Barangay Enrique JC Montilla`;
+
+    let householdId = editingResident.household_id;
+
+    if (householdId) {
+      const { error: hhErr } = await supabase
+        .from('households')
+        .update({
+          purok: editPurok,
+          address_line: cleanAddress,
+          monthly_income: parsedIncome,
+        })
+        .eq('id', householdId);
+
+      if (hhErr) {
+        alert(`Error updating household: ${hhErr.message}`);
+        setSavingEdit(false);
+        return;
+      }
+    } else {
+      const { data: newHh, error: hhInsertErr } = await supabase
+        .from('households')
+        .insert({
+          household_number: `HH-${Date.now().toString().slice(-5)}`,
+          purok: editPurok,
+          address_line: cleanAddress,
+          monthly_income: parsedIncome,
+        })
+        .select()
+        .single();
+
+      if (hhInsertErr) {
+        alert(`Error creating household: ${hhInsertErr.message}`);
+        setSavingEdit(false);
+        return;
+      }
+      householdId = newHh?.id;
+    }
+
+    const { error: resErr } = await supabase
+      .from('residents')
+      .update({
+        household_id: householdId,
+        first_name: cleanFirst,
+        middle_name: cleanMiddle || null,
+        last_name: cleanLast,
+        suffix: cleanSuffix || null,
+        birthdate: editBirthdate || null,
+        gender: editGender,
+        civil_status: editCivilStatus,
+        contact_number: editContactNumber.trim() || null,
+        occupation: editOccupation.trim() || null,
+        is_voter: editIsVoter,
+        is_senior: editIsSenior,
+        is_pwd: editIsPwd,
+        is_4ps: editIs4ps,
+      })
+      .eq('id', editingResident.id);
+
+    if (resErr) {
+      alert(`Error updating resident: ${resErr.message}`);
+      setSavingEdit(false);
+      return;
+    }
+
+    setResidents((prev) =>
+      prev.map((item) =>
+        item.id === editingResident.id
+          ? {
+              ...item,
+              household_id: householdId,
+              first_name: cleanFirst,
+              middle_name: cleanMiddle || null,
+              last_name: cleanLast,
+              suffix: cleanSuffix || null,
+              birthdate: editBirthdate || null,
+              gender: editGender,
+              civil_status: editCivilStatus,
+              contact_number: editContactNumber.trim() || null,
+              occupation: editOccupation.trim() || null,
+              is_voter: editIsVoter,
+              is_senior: editIsSenior,
+              is_pwd: editIsPwd,
+              is_4ps: editIs4ps,
+              households: {
+                ...(item.households || {}),
+                purok: editPurok,
+                address_line: cleanAddress,
+                monthly_income: parsedIncome,
+              },
+            }
+          : item
+      )
+    );
+
+    setSavingEdit(false);
+    setEditingResident(null);
+    fetchData();
   };
 
   const handleDeleteResident = async (id: string, name: string) => {
@@ -318,16 +552,28 @@ export default function SecretaryDashboard() {
     alert('Certificate queued!');
   };
 
-  const formatFullName = (res: any) => {
+  const formatDisplayName = (res: any) => {
     if (!res) return '';
-    return [res.first_name, res.middle_name, res.last_name, res.suffix]
-      .filter(Boolean)
-      .join(' ')
-      .toUpperCase();
+    const cleanFirst = formatNamePart(res.first_name || '', { trimEnd: true });
+    const cleanMiddle = formatNamePart(res.middle_name || '', { trimEnd: true });
+    const cleanLast = formatNamePart(res.last_name || '', { trimEnd: true });
+    const cleanSuffix = formatNamePart(res.suffix || '', { isSuffix: true, trimEnd: true });
+    return [cleanFirst, cleanMiddle, cleanLast, cleanSuffix].filter(Boolean).join(' ');
+  };
+
+  const formatDirectoryName = (res: any) => {
+    if (!res) return '';
+    const cleanFirst = formatNamePart(res.first_name || '', { trimEnd: true });
+    const cleanMiddle = formatNamePart(res.middle_name || '', { trimEnd: true });
+    const cleanLast = formatNamePart(res.last_name || '', { trimEnd: true });
+    const cleanSuffix = formatNamePart(res.suffix || '', { isSuffix: true, trimEnd: true });
+    const givenAndMiddle = [cleanFirst, cleanMiddle].filter(Boolean).join(' ');
+    const base = cleanLast ? `${cleanLast}, ${givenAndMiddle}` : givenAndMiddle;
+    return [base, cleanSuffix].filter(Boolean).join(' ');
   };
 
   const renderCertificateBody = (cert: any) => {
-    const fullName = formatFullName(cert.residents);
+    const fullName = formatDisplayName(cert.residents);
     const residentPurok = cert.residents?.households?.purok || 'Barangay Proper';
 
     switch (cert.certificate_type) {
@@ -480,372 +726,565 @@ export default function SecretaryDashboard() {
 
   return (
     <RoleGuard allowedRole="secretary">
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="bg-white p-5 rounded-xl border shadow-sm flex flex-wrap justify-between items-center gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">Barangay Secretary Portal</h1>
-            <p className="text-xs text-slate-500">Barangay Enrique JC Montilla • Census, Blotter & Issuance Desk</p>
+      <div className="min-h-screen bg-slate-50 p-6">
+        <div className="max-w-7xl mx-auto space-y-6">
+          {/* Header */}
+          <div className="bg-white p-5 rounded-xl border shadow-sm flex flex-wrap justify-between items-center gap-4">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Barangay Secretary Portal</h1>
+              <p className="text-xs text-slate-500">Barangay Enrique JC Montilla • Census, Blotter &amp; Issuance Desk</p>
+            </div>
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut();
+                router.push('/');
+              }}
+              className="text-red-600 flex items-center gap-1 text-sm font-medium hover:underline"
+            >
+              <LogOut className="w-4 h-4" /> Logout
+            </button>
           </div>
-          <button
-            onClick={async () => {
-              await supabase.auth.signOut();
-              router.push('/');
-            }}
-            className="text-red-600 flex items-center gap-1 text-sm font-medium hover:underline"
-          >
-            <LogOut className="w-4 h-4" /> Logout
-          </button>
-        </div>
 
-        {/* Tab Navigation */}
-        <div className="bg-white p-2 rounded-xl border shadow-sm flex flex-wrap gap-2">
-          <button
-            onClick={() => setActiveTab('census')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === 'census' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <UserPlus className="w-4 h-4" /> Resident & Household Census
-          </button>
-          <button
-            onClick={() => setActiveTab('certificates')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === 'certificates' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <FileText className="w-4 h-4" /> Certificates & AI Helper ({certificates.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('blotter')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === 'blotter' ? 'bg-rose-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Scale className="w-4 h-4" /> Blotter & Disputes (
-            {blotters.filter((b) => b.status === 'Pending' || b.status === 'Mediation').length} Active)
-          </button>
-          <button
-            onClick={() => setActiveTab('directory')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === 'directory' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Users className="w-4 h-4" /> Residents Directory ({residents.length})
-          </button>
-        </div>
+          {/* Tab Navigation */}
+          <div className="bg-white p-2 rounded-xl border shadow-sm flex flex-wrap gap-2">
+            <button
+              onClick={() => setActiveTab('census')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                activeTab === 'census' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <UserPlus className="w-4 h-4" /> Resident &amp; Household Census
+            </button>
+            <button
+              onClick={() => setActiveTab('certificates')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                activeTab === 'certificates' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <FileText className="w-4 h-4" /> Certificates &amp; AI Helper ({certificates.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('blotter')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                activeTab === 'blotter' ? 'bg-rose-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Scale className="w-4 h-4" /> Blotter &amp; Disputes (
+              {blotters.filter((b) => b.status === 'Pending' || b.status === 'Mediation').length} Active)
+            </button>
+            <button
+              onClick={() => setActiveTab('directory')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                activeTab === 'directory' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Users className="w-4 h-4" /> Residents Directory ({residents.length})
+            </button>
+          </div>
 
-        {/* TAB 1: FULL CENSUS ENCODING */}
-        {activeTab === 'census' && (
-          <div className="bg-white p-6 rounded-xl border shadow-sm">
-            <h2 className="font-bold text-lg text-slate-900">Encode Complete Resident & Household Profile</h2>
-            <p className="text-xs text-slate-500 mb-6">
-              All demographic attributes feed directly into the Admin AI Census Analyst.
-            </p>
+          {/* TAB 1: FULL CENSUS ENCODING */}
+          {activeTab === 'census' && (
+            <div className="bg-white p-6 rounded-xl border shadow-sm">
+              <h2 className="font-bold text-lg text-slate-900">Encode Complete Resident &amp; Household Profile</h2>
+              <p className="text-xs text-slate-500 mb-6">
+                All demographic attributes feed directly into the Admin AI Census Analyst.
+              </p>
 
-            <form onSubmit={handleAddResident} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">First Name *</label>
-                  <input
-                    placeholder="Juan"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Middle Name</label>
-                  <input
-                    placeholder="Reyes"
-                    value={middleName}
-                    onChange={(e) => setMiddleName(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Last Name *</label>
-                  <input
-                    placeholder="Dela Cruz"
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Suffix</label>
-                  <input
-                    placeholder="Jr., Sr., III"
-                    value={suffix}
-                    onChange={(e) => setSuffix(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Birthdate *</label>
-                  <input
-                    type="date"
-                    value={birthdate}
-                    onChange={(e) => setBirthdate(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Gender *</label>
-                  <select
-                    value={gender}
-                    onChange={(e) => setGender(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                  >
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Civil Status *</label>
-                  <select
-                    value={civilStatus}
-                    onChange={(e) => setCivilStatus(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                  >
-                    <option value="Single">Single</option>
-                    <option value="Married">Married</option>
-                    <option value="Widowed">Widowed</option>
-                    <option value="Separated">Separated</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Contact Number</label>
-                  <input
-                    placeholder="09XX-XXX-XXXX"
-                    value={contactNumber}
-                    onChange={(e) => setContactNumber(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-4 rounded-lg border space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-                  <Building2 className="w-4 h-4" /> Household & Socio-Economic Data
-                </h3>
+              <form onSubmit={handleAddResident} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Purok / Zone *</label>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">First Name *</label>
+                    <input
+                      placeholder="Juan"
+                      value={firstName}
+                      onChange={(e) => setFirstName(formatNamePart(e.target.value))}
+                      onBlur={() => setFirstName((prev) => formatNamePart(prev, { trimEnd: true }))}
+                      className="w-full border p-2 rounded text-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Middle Name</label>
+                    <input
+                      placeholder="Reyes"
+                      value={middleName}
+                      onChange={(e) => setMiddleName(formatNamePart(e.target.value))}
+                      onBlur={() => setMiddleName((prev) => formatNamePart(prev, { trimEnd: true }))}
+                      className="w-full border p-2 rounded text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Last Name *</label>
+                    <input
+                      placeholder="Dela Cruz"
+                      value={lastName}
+                      onChange={(e) => setLastName(formatNamePart(e.target.value))}
+                      onBlur={() => setLastName((prev) => formatNamePart(prev, { trimEnd: true }))}
+                      className="w-full border p-2 rounded text-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Suffix</label>
+                    <input
+                      placeholder="Jr., Sr., III"
+                      value={suffix}
+                      onChange={(e) => setSuffix(formatNamePart(e.target.value, { isSuffix: true }))}
+                      onBlur={() =>
+                        setSuffix((prev) => formatNamePart(prev, { isSuffix: true, trimEnd: true }))
+                      }
+                      className="w-full border p-2 rounded text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Birthdate *</label>
+                    <input
+                      type="date"
+                      value={birthdate}
+                      onChange={(e) => setBirthdate(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Gender *</label>
                     <select
-                      value={purok}
-                      onChange={(e) => setPurok(e.target.value)}
-                      className="w-full bg-white border p-2 rounded text-sm"
+                      value={gender}
+                      onChange={(e) => setGender(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
                     >
-                      <option value="Purok 1">Purok 1</option>
-                      <option value="Purok 2">Purok 2</option>
-                      <option value="Purok 3">Purok 3</option>
-                      <option value="Purok 4">Purok 4</option>
-                      <option value="Purok 5">Purok 5</option>
-                      <option value="Purok 6">Purok 6</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">House / Street Address</label>
-                    <input
-                      placeholder="Lot 4, Blk 2, Main St."
-                      value={addressLine}
-                      onChange={(e) => setAddressLine(e.target.value)}
-                      className="w-full bg-white border p-2 rounded text-sm"
-                    />
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Civil Status *</label>
+                    <select
+                      value={civilStatus}
+                      onChange={(e) => setCivilStatus(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
+                    >
+                      <option value="Single">Single</option>
+                      <option value="Married">Married</option>
+                      <option value="Widowed">Widowed</option>
+                      <option value="Separated">Separated</option>
+                    </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Occupation</label>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Contact Number</label>
                     <input
-                      placeholder="Farmer, Teacher, Student..."
-                      value={occupation}
-                      onChange={(e) => setOccupation(e.target.value)}
-                      className="w-full bg-white border p-2 rounded text-sm"
+                      placeholder="09XX-XXX-XXXX"
+                      value={contactNumber}
+                      onChange={(e) => setContactNumber(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Monthly Household Income (₱)
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-lg border space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                    <Building2 className="w-4 h-4" /> Household &amp; Socio-Economic Data
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Purok / Zone *</label>
+                      <select
+                        value={purok}
+                        onChange={(e) => setPurok(e.target.value)}
+                        className="w-full bg-white border p-2 rounded text-sm"
+                      >
+                        <option value="Purok 1">Purok 1</option>
+                        <option value="Purok 2">Purok 2</option>
+                        <option value="Purok 3">Purok 3</option>
+                        <option value="Purok 4">Purok 4</option>
+                        <option value="Purok 5">Purok 5</option>
+                        <option value="Purok 6">Purok 6</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">House / Street Address</label>
+                      <input
+                        placeholder="Lot 4, Blk 2, Main St."
+                        value={addressLine}
+                        onChange={(e) => setAddressLine(e.target.value)}
+                        className="w-full bg-white border p-2 rounded text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Occupation</label>
+                      <input
+                        placeholder="Farmer, Teacher, Student..."
+                        value={occupation}
+                        onChange={(e) => setOccupation(e.target.value)}
+                        className="w-full bg-white border p-2 rounded text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Monthly Household Income (₱)
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="10000"
+                        value={monthlyIncome}
+                        onChange={(e) => setMonthlyIncome(e.target.value)}
+                        className="w-full bg-white border p-2 rounded text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isVoter}
+                        onChange={(e) => setIsVoter(e.target.checked)}
+                        className="rounded"
+                      />
+                      Registered Voter
                     </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isSenior}
+                        onChange={(e) => setIsSenior(e.target.checked)}
+                        className="rounded"
+                      />
+                      Senior Citizen
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isPwd}
+                        onChange={(e) => setIsPwd(e.target.checked)}
+                        className="rounded"
+                      />
+                      PWD
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={is4ps}
+                        onChange={(e) => setIs4ps(e.target.checked)}
+                        className="rounded"
+                      />
+                      4Ps Beneficiary
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Resident ID Photo (Optional)</label>
                     <input
-                      type="number"
-                      placeholder="10000"
-                      value={monthlyIncome}
-                      onChange={(e) => setMonthlyIncome(e.target.value)}
-                      className="w-full bg-white border p-2 rounded text-sm"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                      className="text-sm w-full border p-1.5 rounded bg-white"
                     />
                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                <div className="flex flex-wrap gap-4 text-sm">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isVoter}
-                      onChange={(e) => setIsVoter(e.target.checked)}
-                      className="rounded"
-                    />
-                    Registered Voter
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isSenior}
-                      onChange={(e) => setIsSenior(e.target.checked)}
-                      className="rounded"
-                    />
-                    Senior Citizen
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isPwd}
-                      onChange={(e) => setIsPwd(e.target.checked)}
-                      className="rounded"
-                    />
-                    PWD
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={is4ps}
-                      onChange={(e) => setIs4ps(e.target.checked)}
-                      className="rounded"
-                    />
-                    4Ps Beneficiary
-                  </label>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Resident ID Photo (Optional)</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
-                    className="text-sm w-full border p-1.5 rounded bg-white"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700"
-              >
-                Save Complete Resident & Household Record
-              </button>
-            </form>
-          </div>
-        )}
-
-        {/* TAB 2: CERTIFICATES & AI HELPER WITH BLOTTER AUTO-BLOCKING */}
-        {activeTab === 'certificates' && (
-          <div className="space-y-6">
-            {/* AI Helper Card */}
-            <div className="bg-indigo-50/70 border border-indigo-200 p-5 rounded-xl space-y-3">
-              <div className="flex items-center gap-2 text-indigo-900 font-bold text-sm">
-                <Sparkles className="w-4 h-4 text-indigo-600" /> AI Certificate Eligibility & Purpose Helper
-              </div>
-              <form onSubmit={handleAiAssist} className="flex flex-col sm:flex-row gap-2">
-                <input
-                  value={aiQuery}
-                  onChange={(e) => setAiQuery(e.target.value)}
-                  placeholder="Describe request (e.g., 'Fresh graduate applying for first job' or '4Ps indigent applying for medical aid')"
-                  className="flex-1 bg-white border border-indigo-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                />
                 <button
                   type="submit"
-                  disabled={aiLoading}
-                  className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                  className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700"
                 >
-                  {aiLoading ? 'Checking...' : 'Check Eligibility'}
+                  Save Complete Resident &amp; Household Record
                 </button>
               </form>
-              {aiSuggestion && (
-                <div className="bg-white p-4 rounded-lg border border-indigo-100 text-sm text-slate-700 whitespace-pre-wrap">
-                  {aiSuggestion}
-                </div>
-              )}
             </div>
+          )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Encode Certificate Form */}
-              <div className="bg-white p-6 rounded-xl border shadow-sm h-fit">
-                <h2 className="font-bold text-base text-slate-900 mb-4">Encode Certificate Request</h2>
-
-                {isBlockedByBlotter && (
-                  <div className="mb-4 p-3.5 bg-red-50 border border-red-300 rounded-lg text-xs text-red-800 space-y-1">
-                    <div className="font-bold flex items-center gap-1.5 text-red-900">
-                      <ShieldAlert className="w-4 h-4 shrink-0" /> Issuance Blocked: Active Blotter Record Found
-                    </div>
-                    <p>
-                      This resident is listed as a respondent in {activeBlottersForSelected.length} unresolved blotter
-                      case(s) ({activeBlottersForSelected.map((b) => b.blotter_number).join(', ')}). Clear or settle the
-                      case in the Blotter tab before issuing clearances.
-                    </p>
+          {/* TAB 2: CERTIFICATES & AI HELPER WITH BLOTTER AUTO-BLOCKING */}
+          {activeTab === 'certificates' && (
+            <div className="space-y-6">
+              {/* AI Helper Card */}
+              <div className="bg-indigo-50/70 border border-indigo-200 p-5 rounded-xl space-y-3">
+                <div className="flex items-center gap-2 text-indigo-900 font-bold text-sm">
+                  <Sparkles className="w-4 h-4 text-indigo-600" /> AI Certificate Eligibility &amp; Purpose Helper
+                </div>
+                <form onSubmit={handleAiAssist} className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    value={aiQuery}
+                    onChange={(e) => setAiQuery(e.target.value)}
+                    placeholder="Describe request (e.g., 'Fresh graduate applying for first job' or '4Ps indigent applying for medical aid')"
+                    className="flex-1 bg-white border border-indigo-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={aiLoading}
+                    className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {aiLoading ? 'Checking...' : 'Check Eligibility'}
+                  </button>
+                </form>
+                {aiSuggestion && (
+                  <div className="bg-white p-4 rounded-lg border border-indigo-100 text-sm text-slate-700 whitespace-pre-wrap">
+                    {aiSuggestion}
                   </div>
                 )}
+              </div>
 
-                <form onSubmit={handleRequestCertificate} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Select Resident *</label>
-                    <select
-                      value={selectedResident}
-                      onChange={(e) => setSelectedResident(e.target.value)}
-                      className="w-full border p-2.5 rounded text-sm"
-                      required
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Encode Certificate Form */}
+                <div className="bg-white p-6 rounded-xl border shadow-sm h-fit">
+                  <h2 className="font-bold text-base text-slate-900 mb-4">Encode Certificate Request</h2>
+
+                  {isBlockedByBlotter && (
+                    <div className="mb-4 p-3.5 bg-red-50 border border-red-300 rounded-lg text-xs text-red-800 space-y-1">
+                      <div className="font-bold flex items-center gap-1.5 text-red-900">
+                        <ShieldAlert className="w-4 h-4 shrink-0" /> Issuance Blocked: Active Blotter Record Found
+                      </div>
+                      <p>
+                        This resident is listed as a respondent in {activeBlottersForSelected.length} unresolved blotter
+                        case(s) ({activeBlottersForSelected.map((b) => b.blotter_number).join(', ')}). Clear or settle the
+                        case in the Blotter tab before issuing clearances.
+                      </p>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleRequestCertificate} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Select Resident *</label>
+                      <select
+                        value={selectedResident}
+                        onChange={(e) => setSelectedResident(e.target.value)}
+                        className="w-full border p-2.5 rounded text-sm"
+                        required
+                      >
+                        <option value="">-- Choose Registered Resident --</option>
+                        {residents.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {formatDirectoryName(r)} ({r.households?.purok || 'No Purok'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Certificate Type *</label>
+                      <select
+                        value={certType}
+                        onChange={(e) => handleCertTypeChange(e.target.value)}
+                        className="w-full border p-2.5 rounded text-sm"
+                      >
+                        {CERTIFICATE_OPTIONS.map((opt) => (
+                          <option key={opt.label} value={opt.label}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Purpose *</label>
+                      <input
+                        placeholder="e.g., Local Employment, DSWD Medical Assistance, Business Permit"
+                        value={purpose}
+                        onChange={(e) => setPurpose(e.target.value)}
+                        className="w-full border p-2.5 rounded text-sm"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Fee (PHP) — 0 = Waived/Free
+                      </label>
+                      <input
+                        type="number"
+                        value={fee}
+                        onChange={(e) => setFee(e.target.value)}
+                        className="w-full border p-2.5 rounded text-sm"
+                        required
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isBlockedByBlotter}
+                      className="w-full bg-emerald-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:bg-red-300 disabled:cursor-not-allowed"
                     >
-                      <option value="">-- Choose Registered Resident --</option>
-                      {residents.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.last_name}, {r.first_name} {r.suffix || ''} ({r.households?.purok || 'No Purok'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      {isBlockedByBlotter ? 'Blocked by Active Blotter Case' : 'Queue Certificate for Issuance'}
+                    </button>
+                  </form>
+                </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Certificate Type *</label>
-                    <select
-                      value={certType}
-                      onChange={(e) => handleCertTypeChange(e.target.value)}
-                      className="w-full border p-2.5 rounded text-sm"
-                    >
-                      {CERTIFICATE_OPTIONS.map((opt) => (
-                        <option key={opt.label} value={opt.label}>
-                          {opt.label}
-                        </option>
+                {/* Certificate Queue Table */}
+                <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm overflow-x-auto">
+                  <h2 className="font-bold text-base text-slate-900 mb-4">Certificate Issuance Queue</h2>
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
+                        <th className="p-3">Control No</th>
+                        <th className="p-3">Resident</th>
+                        <th className="p-3">Document Type</th>
+                        <th className="p-3">Fee</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {certificates.map((cert) => (
+                        <tr key={cert.id} className="hover:bg-slate-50">
+                          <td className="p-3 font-mono font-semibold text-xs">{cert.control_number}</td>
+                          <td className="p-3">
+                            {formatDisplayName(cert.residents)}
+                          </td>
+                          <td className="p-3">{cert.certificate_type}</td>
+                          <td className="p-3">₱{cert.fee}</td>
+                          <td className="p-3">
+                            {cert.status === 'pending_payment' ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800">
+                                <Clock className="w-3 h-3" /> Awaiting OR
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-800">
+                                <CheckCircle2 className="w-3 h-3" /> Ready ({cert.payments?.or_number || 'Waived'})
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {cert.status !== 'pending_payment' ? (
+                              <button
+                                onClick={() => setPrintData(cert)}
+                                className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium flex items-center gap-1 hover:bg-blue-700"
+                              >
+                                <Printer className="w-3.5 h-3.5" /> Print
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-400">Pay at Treasurer</span>
+                            )}
+                          </td>
+                        </tr>
                       ))}
-                    </select>
-                  </div>
+                      {certificates.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="p-6 text-center text-slate-400">
+                            No certificates queued yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
 
+          {/* TAB 3: BLOTTER & DISPUTES */}
+          {activeTab === 'blotter' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-white p-6 rounded-xl border shadow-sm h-fit">
+                <h2 className="font-bold text-base text-slate-900">Record Katarungang Pambarangay Blotter Case</h2>
+                <p className="text-xs text-slate-500 mb-4">
+                  Linking a registered resident as respondent automatically blocks their clearance issuance until settled.
+                </p>
+
+                <form onSubmit={handleAddBlotter} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Purpose *</label>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Complainant Name *</label>
                     <input
-                      placeholder="e.g., Local Employment, DSWD Medical Assistance, Business Permit"
-                      value={purpose}
-                      onChange={(e) => setPurpose(e.target.value)}
-                      className="w-full border p-2.5 rounded text-sm"
+                      placeholder="Full name of complainant"
+                      value={complainantName}
+                      onChange={(e) => setComplainantName(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
                       required
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Fee (PHP) — 0 = Waived/Free
+                      Registered Respondent (Optional)
+                    </label>
+                    <select
+                      value={respondentId}
+                      onChange={(e) => setRespondentId(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
+                    >
+                      <option value="">-- Non-Resident / Unlisted --</option>
+                      {residents.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {formatDirectoryName(r)} ({r.households?.purok || 'No Purok'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      {respondentId ? 'Respondent Override (Optional)' : 'External Respondent Name *'}
                     </label>
                     <input
-                      type="number"
-                      value={fee}
-                      onChange={(e) => setFee(e.target.value)}
+                      placeholder="Enter name if not in dropdown"
+                      value={respondentExternal}
+                      onChange={(e) => setRespondentExternal(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
+                      required={!respondentId}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Incident Type *</label>
+                    <select
+                      value={incidentType}
+                      onChange={(e) => setIncidentType(e.target.value)}
+                      className="w-full border p-2 rounded text-sm"
+                    >
+                      <option value="Physical Injury / Altercation">Physical Injury / Altercation</option>
+                      <option value="Land / Boundary Dispute">Land / Boundary Dispute</option>
+                      <option value="Unpaid Debt / Estafa">Unpaid Debt / Estafa</option>
+                      <option value="Noise / Public Disturbance">Noise / Public Disturbance</option>
+                      <option value="Theft / Property Damage">Theft / Property Damage</option>
+                      <option value="Oral Defamation / Harassment">Oral Defamation / Harassment</option>
+                      <option value="Other Barangay Dispute">Other Barangay Dispute</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Incident Date *</label>
+                      <input
+                        type="date"
+                        value={incidentDate}
+                        onChange={(e) => setIncidentDate(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Incident Location *</label>
+                      <input
+                        placeholder="e.g., Purok 2 Basketball Court"
+                        value={incidentLocation}
+                        onChange={(e) => setIncidentLocation(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-xs font-medium text-slate-700">Incident Narrative *</label>
+                      <button
+                        type="button"
+                        onClick={handleDraftBlotterNarrative}
+                        disabled={draftingBlotter}
+                        className="text-xs text-indigo-600 font-medium flex items-center gap-1 hover:underline"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        {draftingBlotter ? 'Formatting...' : 'Format Formal Narrative with AI'}
+                      </button>
+                    </div>
+                    <textarea
+                      rows={4}
+                      placeholder="Enter rough details of what happened, then click 'Format Formal Narrative with AI'..."
+                      value={narrative}
+                      onChange={(e) => setNarrative(e.target.value)}
                       className="w-full border p-2.5 rounded text-sm"
                       required
                     />
@@ -853,66 +1292,74 @@ export default function SecretaryDashboard() {
 
                   <button
                     type="submit"
-                    disabled={isBlockedByBlotter}
-                    className="w-full bg-emerald-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:bg-red-300 disabled:cursor-not-allowed"
+                    className="w-full bg-rose-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-rose-700"
                   >
-                    {isBlockedByBlotter ? 'Blocked by Active Blotter Case' : 'Queue Certificate for Issuance'}
+                    Log Blotter Case
                   </button>
                 </form>
               </div>
 
-              {/* Certificate Queue Table */}
+              {/* Blotter Cases Table */}
               <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm overflow-x-auto">
-                <h2 className="font-bold text-base text-slate-900 mb-4">Certificate Issuance Queue</h2>
+                <h2 className="font-bold text-base text-slate-900 mb-4">Barangay Blotter Logbook</h2>
                 <table className="w-full text-left border-collapse text-sm">
                   <thead>
                     <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
-                      <th className="p-3">Control No</th>
-                      <th className="p-3">Resident</th>
-                      <th className="p-3">Document Type</th>
-                      <th className="p-3">Fee</th>
+                      <th className="p-3">Blotter No</th>
+                      <th className="p-3">Complainant</th>
+                      <th className="p-3">Respondent</th>
+                      <th className="p-3">Incident</th>
                       <th className="p-3">Status</th>
-                      <th className="p-3">Action</th>
+                      <th className="p-3">Update Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {certificates.map((cert) => (
-                      <tr key={cert.id} className="hover:bg-slate-50">
-                        <td className="p-3 font-mono font-semibold text-xs">{cert.control_number}</td>
+                    {blotters.map((b) => (
+                      <tr key={b.id} className="hover:bg-slate-50">
+                        <td className="p-3 font-mono font-semibold text-xs">{b.blotter_number}</td>
+                        <td className="p-3">{b.complainant_name}</td>
                         <td className="p-3">
-                          {cert.residents?.first_name} {cert.residents?.last_name}
-                        </td>
-                        <td className="p-3">{cert.certificate_type}</td>
-                        <td className="p-3">₱{cert.fee}</td>
-                        <td className="p-3">
-                          {cert.status === 'pending_payment' ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800">
-                              <Clock className="w-3 h-3" /> Awaiting OR
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-800">
-                              <CheckCircle2 className="w-3 h-3" /> Ready ({cert.payments?.or_number || 'Waived'})
-                            </span>
+                          <div className="font-medium">{b.respondent_name}</div>
+                          {b.respondent_resident_id && (
+                            <span className="text-[11px] text-rose-600 font-medium">Registered Resident</span>
                           )}
                         </td>
                         <td className="p-3">
-                          {cert.status !== 'pending_payment' ? (
-                            <button
-                              onClick={() => setPrintData(cert)}
-                              className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium flex items-center gap-1 hover:bg-blue-700"
-                            >
-                              <Printer className="w-3.5 h-3.5" /> Print
-                            </button>
-                          ) : (
-                            <span className="text-xs text-slate-400">Pay at Treasurer</span>
-                          )}
+                          <div className="font-medium text-xs">{b.incident_type}</div>
+                          <div className="text-xs text-slate-500">
+                            {b.incident_date} • {b.incident_location}
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              b.status === 'Settled' || b.status === 'Dismissed'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {b.status}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <select
+                            value={b.status}
+                            onChange={(e) => handleUpdateBlotterStatus(b.id, e.target.value)}
+                            className="border rounded px-2 py-1 text-xs bg-white"
+                          >
+                            <option value="Pending">Pending</option>
+                            <option value="Mediation">Mediation</option>
+                            <option value="Settled">Settled</option>
+                            <option value="Dismissed">Dismissed</option>
+                            <option value="Escalated to CFA">Escalated to CFA</option>
+                          </select>
                         </td>
                       </tr>
                     ))}
-                    {certificates.length === 0 && (
+                    {blotters.length === 0 && (
                       <tr>
                         <td colSpan={6} className="p-6 text-center text-slate-400">
-                          No certificates queued yet.
+                          No blotter cases recorded.
                         </td>
                       </tr>
                     )}
@@ -920,328 +1367,359 @@ export default function SecretaryDashboard() {
                 </table>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* TAB 3: BLOTTER & DISPUTES */}
-        {activeTab === 'blotter' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-xl border shadow-sm h-fit">
-              <h2 className="font-bold text-base text-slate-900">Record Katarungang Pambarangay Blotter Case</h2>
-              <p className="text-xs text-slate-500 mb-4">
-                Linking a registered resident as respondent automatically blocks their clearance issuance until settled.
-              </p>
-
-              <form onSubmit={handleAddBlotter} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Complainant Name *</label>
-                  <input
-                    placeholder="Full name of complainant"
-                    value={complainantName}
-                    onChange={(e) => setComplainantName(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Registered Respondent (Optional)
-                  </label>
-                  <select
-                    value={respondentId}
-                    onChange={(e) => setRespondentId(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                  >
-                    <option value="">-- Non-Resident / Unlisted --</option>
-                    {residents.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.last_name}, {r.first_name} ({r.households?.purok || 'No Purok'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    {respondentId ? 'Respondent Override (Optional)' : 'External Respondent Name *'}
-                  </label>
-                  <input
-                    placeholder="Enter name if not in dropdown"
-                    value={respondentExternal}
-                    onChange={(e) => setRespondentExternal(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                    required={!respondentId}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Incident Type *</label>
-                  <select
-                    value={incidentType}
-                    onChange={(e) => setIncidentType(e.target.value)}
-                    className="w-full border p-2 rounded text-sm"
-                  >
-                    <option value="Physical Injury / Altercation">Physical Injury / Altercation</option>
-                    <option value="Land / Boundary Dispute">Land / Boundary Dispute</option>
-                    <option value="Unpaid Debt / Estafa">Unpaid Debt / Estafa</option>
-                    <option value="Noise / Public Disturbance">Noise / Public Disturbance</option>
-                    <option value="Theft / Property Damage">Theft / Property Damage</option>
-                    <option value="Oral Defamation / Harassment">Oral Defamation / Harassment</option>
-                    <option value="Other Barangay Dispute">Other Barangay Dispute</option>
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Incident Date *</label>
+          {/* TAB 4: RESIDENTS DIRECTORY WITH LIVE SEARCH & FILTER */}
+          {activeTab === 'directory' && (
+            <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
+              <div className="flex flex-wrap justify-between items-center gap-4">
+                <h2 className="font-bold text-base text-slate-900">Barangay Residents Census Directory</h2>
+                <div className="flex flex-wrap gap-2">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                     <input
-                      type="date"
-                      value={incidentDate}
-                      onChange={(e) => setIncidentDate(e.target.value)}
-                      className="w-full border p-2 rounded text-sm"
-                      required
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search name or occupation..."
+                      className="border pl-9 pr-3 py-1.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Incident Location *</label>
-                    <input
-                      placeholder="e.g., Purok 2 Basketball Court"
-                      value={incidentLocation}
-                      onChange={(e) => setIncidentLocation(e.target.value)}
-                      className="w-full border p-2 rounded text-sm"
-                      required
-                    />
-                  </div>
+                  <select
+                    value={purokFilter}
+                    onChange={(e) => setPurokFilter(e.target.value)}
+                    className="border px-3 py-1.5 rounded-lg text-sm"
+                  >
+                    <option value="All">All Puroks</option>
+                    <option value="Purok 1">Purok 1</option>
+                    <option value="Purok 2">Purok 2</option>
+                    <option value="Purok 3">Purok 3</option>
+                    <option value="Purok 4">Purok 4</option>
+                    <option value="Purok 5">Purok 5</option>
+                    <option value="Purok 6">Purok 6</option>
+                  </select>
                 </div>
+              </div>
 
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-xs font-medium text-slate-700">Incident Narrative *</label>
-                    <button
-                      type="button"
-                      onClick={handleDraftBlotterNarrative}
-                      disabled={draftingBlotter}
-                      className="text-xs text-indigo-600 font-medium flex items-center gap-1 hover:underline"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      {draftingBlotter ? 'Formatting...' : 'Format Formal Narrative with AI'}
-                    </button>
-                  </div>
-                  <textarea
-                    rows={4}
-                    placeholder="Enter rough details of what happened, then click 'Format Formal Narrative with AI'..."
-                    value={narrative}
-                    onChange={(e) => setNarrative(e.target.value)}
-                    className="w-full border p-2.5 rounded text-sm"
-                    required
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-rose-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-rose-700"
-                >
-                  Log Blotter Case
-                </button>
-              </form>
-            </div>
-
-            {/* Blotter Cases Table */}
-            <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm overflow-x-auto">
-              <h2 className="font-bold text-base text-slate-900 mb-4">Barangay Blotter Logbook</h2>
-              <table className="w-full text-left border-collapse text-sm">
-                <thead>
-                  <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
-                    <th className="p-3">Blotter No</th>
-                    <th className="p-3">Complainant</th>
-                    <th className="p-3">Respondent</th>
-                    <th className="p-3">Incident</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3">Update Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {blotters.map((b) => (
-                    <tr key={b.id} className="hover:bg-slate-50">
-                      <td className="p-3 font-mono font-semibold text-xs">{b.blotter_number}</td>
-                      <td className="p-3">{b.complainant_name}</td>
-                      <td className="p-3">
-                        <div className="font-medium">{b.respondent_name}</div>
-                        {b.respondent_resident_id && (
-                          <span className="text-[11px] text-rose-600 font-medium">Registered Resident</span>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        <div className="font-medium text-xs">{b.incident_type}</div>
-                        <div className="text-xs text-slate-500">
-                          {b.incident_date} • {b.incident_location}
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                            b.status === 'Settled' || b.status === 'Dismissed'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          {b.status}
-                        </span>
-                      </td>
-                      <td className="p-3">
-                        <select
-                          value={b.status}
-                          onChange={(e) => handleUpdateBlotterStatus(b.id, e.target.value)}
-                          className="border rounded px-2 py-1 text-xs bg-white"
-                        >
-                          <option value="Pending">Pending</option>
-                          <option value="Mediation">Mediation</option>
-                          <option value="Settled">Settled</option>
-                          <option value="Dismissed">Dismissed</option>
-                          <option value="Escalated to CFA">Escalated to CFA</option>
-                        </select>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
+                      <th className="p-3">Photo</th>
+                      <th className="p-3">Full Name</th>
+                      <th className="p-3">Civil Status / Gender</th>
+                      <th className="p-3">Purok &amp; Income</th>
+                      <th className="p-3">Sector Tags</th>
+                      <th className="p-3">Action</th>
                     </tr>
-                  ))}
-                  {blotters.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="p-6 text-center text-slate-400">
-                        No blotter cases recorded.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: RESIDENTS DIRECTORY WITH LIVE SEARCH & FILTER */}
-        {activeTab === 'directory' && (
-          <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
-            <div className="flex flex-wrap justify-between items-center gap-4">
-              <h2 className="font-bold text-base text-slate-900">Barangay Residents Census Directory</h2>
-              <div className="flex flex-wrap gap-2">
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                  <input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search name or occupation..."
-                    className="border pl-9 pr-3 py-1.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <select
-                  value={purokFilter}
-                  onChange={(e) => setPurokFilter(e.target.value)}
-                  className="border px-3 py-1.5 rounded-lg text-sm"
-                >
-                  <option value="All">All Puroks</option>
-                  <option value="Purok 1">Purok 1</option>
-                  <option value="Purok 2">Purok 2</option>
-                  <option value="Purok 3">Purok 3</option>
-                  <option value="Purok 4">Purok 4</option>
-                  <option value="Purok 5">Purok 5</option>
-                  <option value="Purok 6">Purok 6</option>
-                </select>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filteredResidents.map((res) => {
+                      const cleanFirst = formatNamePart(res.first_name || '', { trimEnd: true });
+                      const cleanLast = formatNamePart(res.last_name || '', { trimEnd: true });
+                      return (
+                        <tr key={res.id} className="hover:bg-slate-50">
+                          <td className="p-3">
+                            {res.photo_url ? (
+                              <img
+                                src={res.photo_url}
+                                alt={cleanFirst}
+                                className="w-10 h-10 rounded-full object-cover border"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
+                                {cleanFirst?.[0]}
+                                {cleanLast?.[0]}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-900">
+                              {formatDirectoryName(res)}
+                            </div>
+                            <div className="text-xs text-slate-500">{res.occupation || 'No occupation listed'}</div>
+                          </td>
+                          <td className="p-3">
+                            {res.civil_status} • {res.gender}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-medium">{res.households?.purok || 'Unassigned'}</div>
+                            <div className="text-xs text-slate-500">
+                              ₱{Number(res.households?.monthly_income || 0).toLocaleString()}/mo
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div className="flex flex-wrap gap-1">
+                              {res.is_voter && (
+                                <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[11px] font-medium">
+                                  Voter
+                                </span>
+                              )}
+                              {res.is_senior && (
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-[11px] font-medium">
+                                  Senior
+                                </span>
+                              )}
+                              {res.is_pwd && (
+                                <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-[11px] font-medium">
+                                  PWD
+                                </span>
+                              )}
+                              {res.is_4ps && (
+                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[11px] font-medium">
+                                  4Ps
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(res)}
+                                className="text-blue-600 hover:bg-blue-50 p-1.5 rounded"
+                                title="Edit Resident"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteResident(res.id, formatDisplayName(res))}
+                                className="text-red-600 hover:bg-red-50 p-1.5 rounded"
+                                title="Delete Resident"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filteredResidents.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="p-6 text-center text-slate-400">
+                          No residents match your current search or Purok filter.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
+          )}
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm">
-                <thead>
-                  <tr className="border-b bg-slate-50 text-xs uppercase text-slate-600">
-                    <th className="p-3">Photo</th>
-                    <th className="p-3">Full Name</th>
-                    <th className="p-3">Civil Status / Gender</th>
-                    <th className="p-3">Purok & Income</th>
-                    <th className="p-3">Sector Tags</th>
-                    <th className="p-3">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {filteredResidents.map((res) => (
-                    <tr key={res.id} className="hover:bg-slate-50">
-                      <td className="p-3">
-                        {res.photo_url ? (
-                          <img
-                            src={res.photo_url}
-                            alt={res.first_name}
-                            className="w-10 h-10 rounded-full object-cover border"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
-                            {res.first_name?.[0]}
-                            {res.last_name?.[0]}
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        <div className="font-semibold text-slate-900">
-                          {res.last_name}, {res.first_name} {res.middle_name || ''} {res.suffix || ''}
-                        </div>
-                        <div className="text-xs text-slate-500">{res.occupation || 'No occupation listed'}</div>
-                      </td>
-                      <td className="p-3">
-                        {res.civil_status} • {res.gender}
-                      </td>
-                      <td className="p-3">
-                        <div className="font-medium">{res.households?.purok || 'Unassigned'}</div>
-                        <div className="text-xs text-slate-500">
-                          ₱{Number(res.households?.monthly_income || 0).toLocaleString()}/mo
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <div className="flex flex-wrap gap-1">
-                          {res.is_voter && (
-                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[11px] font-medium">
-                              Voter
-                            </span>
-                          )}
-                          {res.is_senior && (
-                            <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-[11px] font-medium">
-                              Senior
-                            </span>
-                          )}
-                          {res.is_pwd && (
-                            <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-[11px] font-medium">
-                              PWD
-                            </span>
-                          )}
-                          {res.is_4ps && (
-                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[11px] font-medium">
-                              4Ps
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <button
-                          onClick={() => handleDeleteResident(res.id, `${res.first_name} ${res.last_name}`)}
-                          className="text-red-600 hover:bg-red-50 p-1.5 rounded"
-                          title="Delete Resident"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredResidents.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="p-6 text-center text-slate-400">
-                        No residents match your current search or Purok filter.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+          {/* EDIT RESIDENT MODAL */}
+          {editingResident && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4 overflow-y-auto">
+              <div className="bg-white rounded-xl border shadow-xl max-w-2xl w-full p-6 space-y-5 my-8">
+                <div className="flex items-center justify-between border-b pb-3">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Edit Resident &amp; Household Profile</h3>
+                    <p className="text-xs text-slate-500">
+                      Update demographic details, household info, and sector classifications.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingResident(null)}
+                    className="text-slate-400 hover:text-slate-700 p-1 rounded"
+                    aria-label="Close modal"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveEditResident} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">First Name *</label>
+                      <input
+                        value={editFirstName}
+                        onChange={(e) => setEditFirstName(formatNamePart(e.target.value))}
+                        onBlur={() => setEditFirstName((prev) => formatNamePart(prev, { trimEnd: true }))}
+                        className="w-full border p-2 rounded text-sm"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Middle Name</label>
+                      <input
+                        value={editMiddleName}
+                        onChange={(e) => setEditMiddleName(formatNamePart(e.target.value))}
+                        onBlur={() => setEditMiddleName((prev) => formatNamePart(prev, { trimEnd: true }))}
+                        className="w-full border p-2 rounded text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Last Name *</label>
+                      <input
+                        value={editLastName}
+                        onChange={(e) => setEditLastName(formatNamePart(e.target.value))}
+                        onBlur={() => setEditLastName((prev) => formatNamePart(prev, { trimEnd: true }))}
+                        className="w-full border p-2 rounded text-sm"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Suffix</label>
+                      <input
+                        value={editSuffix}
+                        onChange={(e) => setEditSuffix(formatNamePart(e.target.value, { isSuffix: true }))}
+                        onBlur={() =>
+                          setEditSuffix((prev) => formatNamePart(prev, { isSuffix: true, trimEnd: true }))
+                        }
+                        className="w-full border p-2 rounded text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Birthdate</label>
+                      <input
+                        type="date"
+                        value={editBirthdate}
+                        onChange={(e) => setEditBirthdate(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Gender</label>
+                      <select
+                        value={editGender}
+                        onChange={(e) => setEditGender(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                      >
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Civil Status</label>
+                      <select
+                        value={editCivilStatus}
+                        onChange={(e) => setEditCivilStatus(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                      >
+                        <option value="Single">Single</option>
+                        <option value="Married">Married</option>
+                        <option value="Widowed">Widowed</option>
+                        <option value="Separated">Separated</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Contact Number</label>
+                      <input
+                        value={editContactNumber}
+                        onChange={(e) => setEditContactNumber(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Purok / Zone</label>
+                      <select
+                        value={editPurok}
+                        onChange={(e) => setEditPurok(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                      >
+                        <option value="Purok 1">Purok 1</option>
+                        <option value="Purok 2">Purok 2</option>
+                        <option value="Purok 3">Purok 3</option>
+                        <option value="Purok 4">Purok 4</option>
+                        <option value="Purok 5">Purok 5</option>
+                        <option value="Purok 6">Purok 6</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">House / Street Address</label>
+                      <input
+                        value={editAddressLine}
+                        onChange={(e) => setEditAddressLine(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Occupation</label>
+                      <input
+                        value={editOccupation}
+                        onChange={(e) => setEditOccupation(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Monthly Income (₱)</label>
+                      <input
+                        type="number"
+                        value={editMonthlyIncome}
+                        onChange={(e) => setEditMonthlyIncome(e.target.value)}
+                        className="w-full border p-2 rounded text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-4 pt-1 text-sm">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editIsVoter}
+                        onChange={(e) => setEditIsVoter(e.target.checked)}
+                        className="rounded"
+                      />
+                      Registered Voter
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editIsSenior}
+                        onChange={(e) => setEditIsSenior(e.target.checked)}
+                        className="rounded"
+                      />
+                      Senior Citizen
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editIsPwd}
+                        onChange={(e) => setEditIsPwd(e.target.checked)}
+                        className="rounded"
+                      />
+                      PWD
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editIs4ps}
+                        onChange={(e) => setEditIs4ps(e.target.checked)}
+                        className="rounded"
+                      />
+                      4Ps Beneficiary
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-3 border-t">
+                    <button
+                      type="button"
+                      onClick={() => setEditingResident(null)}
+                      className="px-4 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingEdit}
+                      className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {savingEdit ? 'Saving...' : 'Save Changes'}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
-  
     </RoleGuard>
   );
 }
