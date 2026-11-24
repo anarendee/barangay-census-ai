@@ -1,25 +1,15 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
-// Each model has its own separate Free Tier RPD quota in Google AI Studio.
-// If the primary model hits its daily limit (429), it immediately falls back to the next model.
-const MODEL_FALLBACK_CHAIN = [
-  'gemini-3.8-flash',
-  'gemini-3.5-flash-lite',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-];
+const MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(Object.assign(new Error('Request timed out'), { status: 504 })),
-        ms
-      )
-    ),
-  ]);
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryable503(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return msg.includes('503') || msg.includes('unavailable') || msg.includes('overloaded');
 }
 
 export async function POST(req: NextRequest) {
@@ -27,64 +17,59 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'GEMINI_API_KEY is missing in your environment variables.' },
+        { error: 'GEMINI_API_KEY is not configured on the server.' },
         { status: 500 }
       );
     }
 
     const body = await req.json();
-    const prompt = body?.prompt;
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
 
-    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    if (!prompt) {
       return NextResponse.json(
-        { error: 'A valid prompt string is required.' },
+        { error: 'Prompt is required.' },
         { status: 400 }
       );
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    let lastError: any = null;
+    let lastErr: unknown = null;
 
-    for (const modelName of MODEL_FALLBACK_CHAIN) {
-      try {
-        const response = await withTimeout(
-          ai.models.generateContent({
-            model: modelName,
+    for (const model of MODELS) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
             contents: prompt,
-            config: {
-              systemInstruction:
-                'You are an official AI assistant for Barangay Enrique JC Montilla, City of Tacurong, Sultan Kudarat. Provide clear, accurate, concise, and actionable governance, census, and administrative assistance.',
-              temperature: 0.3,
-            },
-          }),
-          15000 // 15s per model so Vercel never times out
-        );
+          });
 
-        const reply = response.text?.trim();
-        if (reply) {
-          return NextResponse.json({ reply, modelUsed: modelName });
+          const reply = response.text?.trim() || '';
+          if (!reply) {
+            return NextResponse.json(
+              { error: 'Gemini returned an empty response.' },
+              { status: 502 }
+            );
+          }
+
+          return NextResponse.json({ reply });
+        } catch (err) {
+          lastErr = err;
+          if (!isRetryable503(err)) {
+            throw err;
+          }
+          if (attempt === 0) {
+            await sleep(700);
+          }
         }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Model ${modelName} failed (${err?.status || err?.message}), trying next model...`);
-        // Immediately move to the next model in MODEL_FALLBACK_CHAIN on 429, 503, or timeout
-        continue;
       }
     }
 
     return NextResponse.json(
-      {
-        error:
-          lastError?.message ||
-          'All AI models are currently busy or out of daily quota. Please try again shortly.',
-      },
+      { error: 'AI service is temporarily busy (503). Please try again in a moment.' },
       { status: 503 }
     );
-  } catch (err: any) {
-    console.error('AI Route Error:', err);
-    return NextResponse.json(
-      { error: err?.message || 'Failed to process AI request.' },
-      { status: 500 }
-    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unexpected AI server error.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
